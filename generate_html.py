@@ -234,7 +234,7 @@ if __name__ == "__main__":
     iv_data = get_iv_for_stocks(df)
     html = generate_html(vcp, ql, htf, spy_perf, iv_data)
     
-    output = '/Users/oscarclaw/.openclaw/workspace-trading/tradingview/screener.html'
+    output = 'screener.html'
     with open(output, 'w') as f:
         f.write(html)
     print(f"Done in {time.time()-start:.0f}s: {output}")
