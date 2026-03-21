@@ -32,6 +32,38 @@ def get_all_stocks():
     df['RS'] = df['Perf.6M'] - spy_perf
     return df, spy_perf
 
+def get_company_info(df):
+    print("Fetching company info...")
+    tickers = df['ticker'].tolist()
+    company_data = {}
+    count = 0
+    
+    for ticker in tickers:
+        if ':' not in ticker:
+            continue
+        symbol = ticker.split(':')[1]
+        if ticker.startswith('OTC:'):
+            continue
+        
+        try:
+            t = yf.Ticker(symbol)
+            info = t.info
+            if info:
+                company_data[ticker] = {
+                    'sector': info.get('sector', ''),
+                    'industry': info.get('industry', ''),
+                    'longBusinessSummary': info.get('longBusinessSummary', '')
+                }
+        except:
+            pass
+        
+        count += 1
+        if count % 30 == 0:
+            print(f"  {count}/{len(tickers)}...")
+    
+    print(f"Got info for {len(company_data)} companies")
+    return company_data
+
 def get_iv_for_stocks(df):
     print("Fetching IV from yfinance options...")
     tickers = df['ticker'].tolist()
@@ -92,7 +124,7 @@ def screen_qullamaggie(df):
 def screen_htf(df):
     return df[(df['dist_high'] <= 20) & (df['Perf.6M'] >= 50) & (df['Perf.6M'] <= 150) & (df['ADR'] >= 3) & (df['ADR'] <= 15) & (df['Perf.6M'] <= 200) & (df['ADR'] >= 2) & (df['close'] > df['SMA50'])].copy().sort_values('volume', ascending=False)
 
-def make_card(row, iv_data):
+def make_card(row, iv_data, company_data):
     ticker = row['ticker']
     name = row['name']
     close = row['close']
@@ -101,6 +133,10 @@ def make_card(row, iv_data):
     adr = row['ADR']
     rs = row.get('RS', 0)
     iv = iv_data.get(ticker, None)
+    info = company_data.get(ticker, {})
+    sector = info.get('sector', '')
+    industry = info.get('industry', '')
+    desc = info.get('longBusinessSummary', '')[:200] + '...' if info.get('longBusinessSummary') else ''
     
     iv_str = f"{iv*100:.0f}%" if iv else "N/A"
     iv_color = "positive" if iv and iv*100 < 30 else "negative"
@@ -109,6 +145,9 @@ def make_card(row, iv_data):
     if iv:
         iv_class = "iv-low" if iv*100 < 30 else ("iv-mid" if iv*100 < 50 else "iv-high")
         iv_badge = f'<span class="iv-badge {iv_class}">IV {iv*100:.0f}%</span>'
+    
+    sector_html = f'<div class="sector">{sector}{" / " + industry if industry else ""}</div>' if sector else ""
+    desc_html = f'<div class="company-desc">{desc}</div>' if desc else ""
     
     return f'''
     <div class="stock-card" onclick="openChart('{ticker}', '{name}')">
@@ -120,6 +159,8 @@ def make_card(row, iv_data):
             </div>
             <div class="stock-price">${close:.2f}</div>
         </div>
+        {sector_html}
+        {desc_html}
         <div class="stock-metrics">
             <div class="metric">
                 <div class="metric-label">Dist</div>
@@ -142,12 +183,12 @@ def make_card(row, iv_data):
                 <div class="metric-value {iv_color}">{iv_str}</div>
             </div>
         </div>
-    </div>'''
+    </div>'''''
 
-def generate_html(vcp, ql, htf, spy_perf, iv_data):
-    vcp_html = ''.join([make_card(row, iv_data) for _, row in vcp.head(50).iterrows()])
-    ql_html = ''.join([make_card(row, iv_data) for _, row in ql.head(50).iterrows()])
-    htf_html = ''.join([make_card(row, iv_data) for _, row in htf.head(50).iterrows()])
+def generate_html(vcp, ql, htf, spy_perf, iv_data, company_data):
+    vcp_html = ''.join([make_card(row, iv_data, company_data) for _, row in vcp.head(50).iterrows()])
+    ql_html = ''.join([make_card(row, iv_data, company_data) for _, row in ql.head(50).iterrows()])
+    htf_html = ''.join([make_card(row, iv_data, company_data) for _, row in htf.head(50).iterrows()])
     
     html = f'''<!DOCTYPE html>
 <html>
@@ -234,7 +275,7 @@ if __name__ == "__main__":
     iv_data = get_iv_for_stocks(df)
     html = generate_html(vcp, ql, htf, spy_perf, iv_data)
     
-    output = 'screener.html'
+    output = '/Users/oscarclaw/.openclaw/workspace-trading/tradingview/screener.html'
     with open(output, 'w') as f:
         f.write(html)
     print(f"Done in {time.time()-start:.0f}s: {output}")
