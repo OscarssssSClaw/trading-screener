@@ -273,7 +273,7 @@ if __name__ == "__main__":
     print(f"VCP:{len(vcp)} QL:{len(ql)} HTF:{len(htf)}")
     
     iv_data = get_iv_for_stocks(df)
-    html = generate_html(vcp, ql, htf, spy_perf, iv_data)
+    html = generate_html(vcp, ql, htf, spy_perf, iv_data, company_data)
     
     output = '/Users/oscarclaw/.openclaw/workspace-trading/tradingview/screener.html'
     with open(output, 'w') as f:
