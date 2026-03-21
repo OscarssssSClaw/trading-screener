@@ -335,7 +335,7 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 .iv-low{{background:#26a69a;color:#fff}}
 .iv-mid{{background:#ef5350;color:#fff}}
 .iv-high{{background:#b71c1c;color:#fff}}
-.chart-container{{height:200px;min-height:200px;margin-top:10px;background:#1e222d;border-radius:8px;overflow:hidden;contain:layout style}}
+.chart-container{{height:200px;margin-top:10px;background:#1e222d;border-radius:8px;overflow:hidden}}
 .chart-container.visible{{display:block}}
 </style>
 </head>
@@ -447,16 +447,7 @@ window.addEventListener('load', function() {{
                         candleSeries.setData(data);
                         chart.timeScale().fitContent();
                         chartInstances[chartId] = chart;
-                        new ResizeObserver(function(entries) {{
-                            var entry = entries[0];
-                            if (entry && entry.contentRect) {{
-                                var newWidth = entry.contentRect.width;
-                                if (newWidth > 0 && newWidth !== container._lastWidth) {{
-                                    container._lastWidth = newWidth;
-                                    chart.applyOptions({{ width: newWidth }});
-                                }}
-                            }}
-                        }}).observe(container);
+                        new ResizeObserver(function() {{ chart.applyOptions({{ width: container.clientWidth }}); }}).observe(container);
                     }}
                 }} catch(e) {{}}
             }}
