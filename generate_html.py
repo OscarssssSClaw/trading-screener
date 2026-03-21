@@ -436,7 +436,7 @@ window.addEventListener('load', function() {{
                             grid: {{ vertLines: {{ color: '#2a2e39' }}, horzLines: {{ color: '#2a2e39' }} }},
                             timeScale: {{ borderColor: '#2a2e39' }},
                             rightPriceScale: {{ borderColor: '#2a2e39' }},
-                            handleScroll: false,
+                            
                             handleScale: false
                         }});
                         var candleSeries = chart.addCandlestickSeries({{
