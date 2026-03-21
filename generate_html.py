@@ -446,10 +446,6 @@ window.addEventListener('load', function() {{
                         }});
                         candleSeries.setData(data);
                         chart.timeScale().fitContent();
-                        chartInstances[chartId] = chart;
-                                }}
-                            }}
-                        }}).observe(container);
                     }}
                 }} catch(e) {{}}
             }}
