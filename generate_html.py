@@ -448,8 +448,8 @@ window.addEventListener('load', function() {{
                         chart.timeScale().fitContent();
                         chartInstances[chartId] = chart;
                         // Block scroll/touch/zoom on chart
-                        container.addEventListener('wheel', function(e) { e.preventDefault(); }, {passive: false});
-                        container.addEventListener('touchmove', function(e) { e.preventDefault(); }, {passive: false});
+                        container.addEventListener('wheel', function(e) {{ e.preventDefault(); }}, {{passive: false}});
+                        container.addEventListener('touchmove', function(e) {{ e.preventDefault(); }}, {{passive: false}});
                         new ResizeObserver(function() {{ chart.applyOptions({{ width: container.clientWidth }}); }}).observe(container);
                     }}
                 }} catch(e) {{}}
