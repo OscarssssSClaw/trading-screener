@@ -168,7 +168,7 @@ def make_card(row, iv_data, company_data, price_data):
         dist_color, dist_high,
         perf_color, perf_6m,
         rs_color, rs,
-        adr, adr,
+        adr,
         iv_color_class, iv_str,
         chart_id,
         price_json
