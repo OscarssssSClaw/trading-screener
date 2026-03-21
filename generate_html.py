@@ -125,8 +125,9 @@ def make_card(row, iv_data, company_data, price_data):
     perf_color = "positive" if perf_6m > 0 else "negative"
     rs_color = "positive" if rs > 0 else "negative"
     
+    onclick = "toggleChart('{}')".format(chart_id)
     
-    card = '''<div class="stock-card">
+    card = '''<div class="stock-card" onclick="{}">
         <div class="stock-header">
             <div class="stock-info">
                 <div class="stock-name">{}</div>
@@ -162,7 +163,7 @@ def make_card(row, iv_data, company_data, price_data):
         <div class="chart-container" id="{}"></div>
         <script type="text/json" class="chart-data">{}</script>
     </div>'''.format(
-        name, ticker, iv_badge, close,
+        onclick, name, ticker, iv_badge, close,
         sector_html, desc_html,
         dist_color, dist_high,
         perf_color, perf_6m,
@@ -335,7 +336,7 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 .iv-low{{background:#26a69a;color:#fff}}
 .iv-mid{{background:#ef5350;color:#fff}}
 .iv-high{{background:#b71c1c;color:#fff}}
-.chart-container{{height:200px;min-height:200px;margin-top:10px;background:#1e222d;border-radius:8px;overflow:hidden;contain:layout style}}
+.chart-container{{display:none;height:200px;margin-top:10px;background:#1e222d;border-radius:8px;overflow:hidden}}
 .chart-container.visible{{display:block}}
 </style>
 </head>
@@ -415,42 +416,19 @@ function toggleChart(containerId){{
     chartInstances[containerId] = chart;
     
     // Handle resize
+    var resizeObserver = new ResizeObserver(function() {{
+        chart.applyOptions({{ width: container.clientWidth }});
     }});
     resizeObserver.observe(container);
 }}
 
-// Auto-load all charts on page load
+// Auto-load first chart in each tab on load
 window.addEventListener('load', function() {{
-    document.querySelectorAll('.chart-container').forEach(function(container) {{
-        var chartId = container.id;
-        if (!chartInstances[chartId]) {{
-            var dataEl = container.nextElementSibling;
-            if (dataEl && dataEl.classList.contains('chart-data')) {{
-                try {{
-                    var data = JSON.parse(dataEl.textContent);
-                    if (data && data.length > 0) {{
-                        var chart = LightweightCharts.createChart(container, {{
-                            width: container.clientWidth,
-                            height: 196,
-                            layout: {{ background: {{ type: 'solid', color: '#1e222d' }}, textColor: '#d1d4dc' }},
-                            grid: {{ vertLines: {{ color: '#2a2e39' }}, horzLines: {{ color: '#2a2e39' }} }},
-                            timeScale: {{ borderColor: '#2a2e39' }},
-                            rightPriceScale: {{ borderColor: '#2a2e39' }},
-                            
-                            handleScale: false
-                        }});
-                        var candleSeries = chart.addCandlestickSeries({{
-                            upColor: '#26a69a', downColor: '#ef5350',
-                            borderUpColor: '#26a69a', borderDownColor: '#ef5350',
-                            wickUpColor: '#26a69a', wickDownColor: '#ef5350'
-                        }});
-                        candleSeries.setData(data);
-                        chart.timeScale().fitContent();
-                    }}
-                }} catch(e) {{}}
-            }}
-        }}
-    }});
+    var firstCards = document.querySelectorAll('.content.active .stock-card');
+    if (firstCards.length > 0) {{
+        var firstChartId = firstCards[0].querySelector('.chart-container').id;
+        // Don't auto-open, just be ready
+    }}
 }});
 </script>
 </body>
