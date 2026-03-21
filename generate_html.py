@@ -273,10 +273,13 @@ if __name__ == "__main__":
     print(f"VCP:{len(vcp)} QL:{len(ql)} HTF:{len(htf)}")
     
     company_data = get_company_info(df)
-    iv_data = get_iv_for_stocks(df)
+    # Only fetch IV for stocks that will be displayed (VCP/QL/HTF filtered)
+    display_tickers = set(vcp['ticker'].tolist() + ql['ticker'].tolist() + htf['ticker'].tolist())
+    display_df = df[df['ticker'].isin(display_tickers)]
+    iv_data = get_iv_for_stocks(display_df)
     html = generate_html(vcp, ql, htf, spy_perf, iv_data, company_data)
     
-    output = 'screener.html'
+    output = '/Users/oscarclaw/.openclaw/workspace-trading/tradingview/screener.html'
     with open(output, 'w') as f:
         f.write(html)
     print(f"Done in {time.time()-start:.0f}s: {output}")
