@@ -272,6 +272,7 @@ if __name__ == "__main__":
     htf = screen_htf(df)
     print(f"VCP:{len(vcp)} QL:{len(ql)} HTF:{len(htf)}")
     
+    company_data = get_company_info(df)
     iv_data = get_iv_for_stocks(df)
     html = generate_html(vcp, ql, htf, spy_perf, iv_data, company_data)
     
