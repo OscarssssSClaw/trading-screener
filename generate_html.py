@@ -335,7 +335,7 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 .iv-low{{background:#26a69a;color:#fff}}
 .iv-mid{{background:#ef5350;color:#fff}}
 .iv-high{{background:#b71c1c;color:#fff}}
-.chart-container{height:200px;margin-top:10px;background:#1e222d;border-radius:8px;overflow:hidden}}
+.chart-container{{height:200px;margin-top:10px;background:#1e222d;border-radius:8px;overflow:hidden}}
 .chart-container.visible{{display:block}}
 </style>
 </head>
@@ -421,13 +421,38 @@ function toggleChart(containerId){{
     resizeObserver.observe(container);
 }}
 
-// Auto-load first chart in each tab on load
+// Auto-load all charts on page load
 window.addEventListener('load', function() {{
-    var firstCards = document.querySelectorAll('.content.active .stock-card');
-    if (firstCards.length > 0) {{
-        var firstChartId = firstCards[0].querySelector('.chart-container').id;
-        // Don't auto-open, just be ready
-    }}
+    document.querySelectorAll('.chart-container').forEach(function(container) {{
+        var chartId = container.id;
+        if (!chartInstances[chartId]) {{
+            var dataEl = container.nextElementSibling;
+            if (dataEl && dataEl.classList.contains('chart-data')) {{
+                try {{
+                    var data = JSON.parse(dataEl.textContent);
+                    if (data && data.length > 0) {{
+                        var chart = LightweightCharts.createChart(container, {{
+                            width: container.clientWidth,
+                            height: 196,
+                            layout: {{ background: {{ type: 'solid', color: '#1e222d' }}, textColor: '#d1d4dc' }},
+                            grid: {{ vertLines: {{ color: '#2a2e39' }}, horzLines: {{ color: '#2a2e39' }} }},
+                            timeScale: {{ borderColor: '#2a2e39' }},
+                            rightPriceScale: {{ borderColor: '#2a2e39' }}
+                        }});
+                        var candleSeries = chart.addCandlestickSeries({{
+                            upColor: '#26a69a', downColor: '#ef5350',
+                            borderUpColor: '#26a69a', borderDownColor: '#ef5350',
+                            wickUpColor: '#26a69a', wickDownColor: '#ef5350'
+                        }});
+                        candleSeries.setData(data);
+                        chart.timeScale().fitContent();
+                        chartInstances[chartId] = chart;
+                        new ResizeObserver(function() {{ chart.applyOptions({{ width: container.clientWidth }}); }}).observe(container);
+                    }}
+                }} catch(e) {{}}
+            }}
+        }}
+    }});
 }});
 </script>
 </body>
