@@ -1,50 +1,140 @@
-"""
-Generate HTML screener with TradingView charts + IV from yfinance
-"""
+#!/usr/bin/env python3
+"""TradingView Screener HTML Generator - Optimized with direct queries"""
 
+import time
+import yfinance as yf
 from tradingview_screener import Query, Column
 import pandas as pd
-import yfinance as yf
-from datetime import datetime
-import time
 
-def get_all_stocks():
-    total, df = (
+start = time.time()
+
+print("Fetching VCP stocks directly...")
+try:
+    total_vcp, vcp_raw = (
         Query()
         .select('name', 'close', 'volume', 'ADR', 'Perf.6M', 'SMA20', 'SMA50', 'High.All', 'RSI')
-        .where(Column('volume') > 1_000_000)
-        .order_by('volume', ascending=False)
-        .limit(1000)
+        .where(
+            Column('volume') > 1_000_000,
+            Column('Perf.6M') >= 50,
+            Column('close') > Column('SMA50')
+        )
+        .limit(100)
         .get_scanner_data()
     )
-    
-    df = df.dropna(subset=['High.All', 'close', 'SMA20', 'SMA50', 'Perf.6M', 'ADR'])
-    df['dist_high'] = (df['High.All'] - df['close']) / df['High.All'] * 100
-    
-    spy_perf = 0
-    try:
-        spy_result, spy_df = Query().select('Perf.6M').where(Column('name') == 'SPY').limit(1).get_scanner_data()
-        if len(spy_df) > 0:
-            spy_perf = spy_df['Perf.6M'].iloc[0]
-    except:
-        pass
-    
-    df['RS'] = df['Perf.6M'] - spy_perf
-    return df, spy_perf
+    vcp_raw['dist_high'] = (vcp_raw['High.All'] - vcp_raw['close']) / vcp_raw['High.All'] * 100
+    vcp = vcp_raw[vcp_raw['dist_high'] <= 25].copy().sort_values('volume', ascending=False)
+except Exception as e:
+    print(f"VCP query failed: {e}")
+    vcp = pd.DataFrame()
 
-def get_company_info(df):
-    print("Fetching company info...")
-    tickers = df['ticker'].tolist()
-    company_data = {}
-    count = 0
-    
-    for ticker in tickers:
+print(f"VCP: {len(vcp)}")
+
+print("Fetching QL stocks directly...")
+try:
+    total_ql, ql_raw = (
+        Query()
+        .select('name', 'close', 'volume', 'ADR', 'Perf.6M', 'SMA20', 'SMA50', 'High.All', 'RSI')
+        .where(
+            Column('volume') > 1_000_000,
+            Column('Perf.6M') >= 50,
+            Column('close') > Column('SMA20')
+        )
+        .limit(100)
+        .get_scanner_data()
+    )
+    ql_raw['dist_high'] = (ql_raw['High.All'] - ql_raw['close']) / ql_raw['High.All'] * 100
+    ql = ql_raw[ql_raw['dist_high'] <= 15].copy().sort_values('volume', ascending=False)
+except Exception as e:
+    print(f"QL query failed: {e}")
+    ql = pd.DataFrame()
+
+print(f"QL: {len(ql)}")
+
+print("Fetching HTF stocks directly...")
+try:
+    total_htf, htf_raw = (
+        Query()
+        .select('name', 'close', 'volume', 'ADR', 'Perf.6M', 'SMA20', 'SMA50', 'High.All', 'RSI')
+        .where(
+            Column('volume') > 1_000_000,
+            Column('Perf.6M') >= 50,
+            Column('Perf.6M') <= 150,
+            Column('ADR') >= 3,
+            Column('ADR') <= 15,
+            Column('close') > Column('SMA50')
+        )
+        .limit(100)
+        .get_scanner_data()
+    )
+    htf_raw['dist_high'] = (htf_raw['High.All'] - htf_raw['close']) / htf_raw['High.All'] * 100
+    htf = htf_raw[htf_raw['dist_high'] <= 20].copy().sort_values('volume', ascending=False)
+except Exception as e:
+    print(f"HTF query failed: {e}")
+    htf = pd.DataFrame()
+
+print(f"HTF: {len(htf)}")
+
+# Get SPY performance for reference
+spy_perf = 0
+try:
+    spy_result, spy_df = Query().select('Perf.6M').where(Column('name') == 'SPY').limit(1).get_scanner_data()
+    if len(spy_df) > 0:
+        spy_perf = spy_df['Perf.6M'].iloc[0]
+except:
+    pass
+
+print(f"SPY 6M: {spy_perf:.1f}%")
+
+# Add RS vs SPY
+for df in [vcp, ql, htf]:
+    df['RS'] = df['Perf.6M'] - spy_perf
+
+# Combine all for IV fetching
+all_stocks = pd.concat([vcp, ql, htf]).drop_duplicates(subset='ticker')
+
+def get_iv_for_stocks(tickers):
+    print(f"Fetching IV for {len(tickers)} stocks...")
+    iv_data = {}
+    for i, ticker in enumerate(tickers):
         if ':' not in ticker:
             continue
         symbol = ticker.split(':')[1]
         if ticker.startswith('OTC:'):
             continue
-        
+        try:
+            t = yf.Ticker(symbol)
+            info = t.info
+            stock_price = info.get('regularMarketPrice', 0)
+            if stock_price <= 0:
+                continue
+            opt = t.option_chain()
+            if opt.calls is None or len(opt.calls) == 0:
+                continue
+            active = opt.calls[opt.calls['bid'] > 0]
+            if len(active) == 0:
+                continue
+            active = active.copy()
+            active['dist'] = abs(active['strike'] - stock_price)
+            atm_idx = active['dist'].idxmin()
+            iv = active.loc[atm_idx].get('impliedVolatility', 0)
+            if iv > 0:
+                iv_data[ticker] = iv
+        except:
+            pass
+        if (i + 1) % 10 == 0:
+            print(f"  {i+1}/{len(tickers)}...")
+    print(f"Got IV for {len(iv_data)} stocks")
+    return iv_data
+
+def get_company_info(tickers):
+    print(f"Fetching company info for {len(tickers)} stocks...")
+    company_data = {}
+    for i, ticker in enumerate(tickers):
+        if ':' not in ticker:
+            continue
+        symbol = ticker.split(':')[1]
+        if ticker.startswith('OTC:'):
+            continue
         try:
             t = yf.Ticker(symbol)
             info = t.info
@@ -56,73 +146,13 @@ def get_company_info(df):
                 }
         except:
             pass
-        
-        count += 1
-        if count % 30 == 0:
-            print(f"  {count}/{len(tickers)}...")
-    
+        if (i + 1) % 10 == 0:
+            print(f"  {i+1}/{len(tickers)}...")
     print(f"Got info for {len(company_data)} companies")
     return company_data
 
-def get_iv_for_stocks(df):
-    print("Fetching IV from yfinance options...")
-    tickers = df['ticker'].tolist()
-    iv_data = {}
-    count = 0
-    
-    for ticker in tickers:
-        if ':' not in ticker:  # Skip non-exchange tickers
-            continue
-            
-        symbol = ticker.split(':')[1]
-        
-        # Skip OTC stocks
-        if ticker.startswith('OTC:'):
-            continue
-        
-        try:
-            t = yf.Ticker(symbol)
-            info = t.info
-            stock_price = info.get('regularMarketPrice', 0)
-            
-            if stock_price <= 0:
-                continue
-                
-            opt = t.option_chain()
-            if opt.calls is None or len(opt.calls) == 0:
-                continue
-                
-            active_calls = opt.calls[opt.calls['bid'] > 0]
-            if len(active_calls) == 0:
-                continue
-                
-            active_calls = active_calls.copy()
-            active_calls['dist'] = abs(active_calls['strike'] - stock_price)
-            atm_idx = active_calls['dist'].idxmin()
-            atm = active_calls.loc[atm_idx]
-            iv = atm.get('impliedVolatility', 0)
-            
-            if iv > 0:
-                iv_data[ticker] = iv
-                
-        except Exception as e:
-            pass
-        
-        count += 1
-        if count % 30 == 0:
-            print(f"  {count}/{len(tickers)}...")
-    
-    print(f"Got IV for {len(iv_data)} stocks")
-    return iv_data
-
-def screen_vcp(df):
-    return df[(df['dist_high'] <= 25) & (df['Perf.6M'] >= 50) & (df['close'] > df['SMA50'])].copy().sort_values('volume', ascending=False)
-
-def screen_qullamaggie(df):
-    return df[(df['dist_high'] <= 15) & (df['Perf.6M'] >= 50) & (df['close'] > df['SMA20'])].copy().sort_values('volume', ascending=False)
-
-def screen_htf(df):
-    return df[(df['dist_high'] <= 20) & (df['Perf.6M'] >= 50) & (df['Perf.6M'] <= 150) & (df['ADR'] >= 3) & (df['ADR'] <= 15) & (df['Perf.6M'] <= 200) & (df['ADR'] >= 2) & (df['close'] > df['SMA50'])].copy().sort_values('volume', ascending=False)
+iv_data = get_iv_for_stocks(all_stocks['ticker'].tolist())
+company_data = get_company_info(all_stocks['ticker'].tolist())
 
 def make_card(row, iv_data, company_data):
     ticker = row['ticker']
@@ -183,7 +213,7 @@ def make_card(row, iv_data, company_data):
                 <div class="metric-value {iv_color}">{iv_str}</div>
             </div>
         </div>
-    </div>'''''
+    </div>'''
 
 def generate_html(vcp, ql, htf, spy_perf, iv_data, company_data):
     vcp_html = ''.join([make_card(row, iv_data, company_data) for _, row in vcp.head(50).iterrows()])
@@ -193,8 +223,7 @@ def generate_html(vcp, ql, htf, spy_perf, iv_data, company_data):
     html = f'''<!DOCTYPE html>
 <html>
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta charset="UTF-8"></meta><meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Trading Screener</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
@@ -216,70 +245,49 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 .stock-ticker{{color:#787b86;font-size:12px;margin-top:2px}}
 .stock-price{{font-size:18px;font-weight:700;color:#fff}}
 .stock-metrics{{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}}
-.metric{{text-align:center;padding:8px 4px;background:#2a2e39;border-radius:8px}}
-.metric-label{{font-size:9px;color:#787b86;text-transform:uppercase}}
-.metric-value{{font-size:12px;font-weight:600;margin-top:3px}}
+.metric{{text-align:center}}
+.metric-label{{font-size:10px;color:#787b86;margin-bottom:2px}}
+.metric-value{{font-size:13px;font-weight:600}}
 .positive{{color:#26a69a}}
 .negative{{color:#ef5350}}
+.sector{{font-size:11px;color:#787b86;margin:4px 0}}
+.company-desc{{font-size:11px;color:#aaa;margin:4px 0;line-height:1.4}}
 .iv-badge{{display:inline-block;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600;margin-top:3px}}
 .iv-low{{background:#26a69a;color:#fff}}
-.iv-mid{{background:#ff9800;color:#fff}}
-.iv-high{{background:#ef5350;color:#fff}}
-.chart-modal{{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:#131722;z-index:1000;flex-direction:column}}
-.chart-modal.active{{display:flex}}
-.chart-header{{display:flex;justify-content:space-between;align-items:center;padding:12px 15px;background:#1e222d;border-bottom:1px solid #2a2e39}}
-.chart-title{{font-weight:600;color:#fff}}
-.close-btn{{background:#ef5350;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600}}
-.chart-frame{{flex:1;width:100%;border:none}}
+.iv-mid{{background:#ef5350;color:#fff}}
+.iv-high{{background:#b71c1c;color:#fff}}
 </style>
 </head>
 <body>
 <div class="header">
-<h1>📈 Trading Screener</h1>
-<p>SPY 6M: {spy_perf:.1f}% | {datetime.now().strftime('%Y-%m-%d %H:%M')}</p>
+    <h1>📈 Trading Screener</h1>
+    <p>SPY 6M: {spy_perf:.1f}% | VCP | Qullamaggie | HTF</p>
 </div>
 <div class="tabs">
-<div class="tab active" data-tab="vcp">VCP<div class="count">{len(vcp)}</div></div>
-<div class="tab" data-tab="ql">Qullamaggie<div class="count">{len(ql)}</div></div>
-<div class="tab" data-tab="htf">HTF<div class="count">{len(htf)}</div></div>
+    <div class="tab active" onclick="showTab('vcp')">VCP<span class="count">{len(vcp)} stocks</span></div>
+    <div class="tab" onclick="showTab('ql')">Qullamaggie<span class="count">{len(ql)} stocks</span></div>
+    <div class="tab" onclick="showTab('htf')">HTF<span class="count">{len(htf)} stocks</span></div>
 </div>
 <div id="vcp" class="content active">{vcp_html}</div>
 <div id="ql" class="content">{ql_html}</div>
 <div id="htf" class="content">{htf_html}</div>
-<div id="chartModal" class="chart-modal">
-<div class="chart-header"><div class="chart-title" id="chartTitle">Chart</div><button class="close-btn" onclick="closeChart()">✕ Close</button></div>
-<iframe id="chartFrame" class="chart-frame" src=""></iframe>
-</div>
 <script>
-function switchTab(tab){{document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));document.querySelectorAll('.content').forEach(c=>c.classList.remove('active'));document.getElementById(tab).classList.add('active');document.querySelector('[data-tab="' + tab + '"]').classList.add('active');}}
-document.querySelectorAll('.tab').forEach(tab=>{{tab.addEventListener('click',()=>switchTab(tab.dataset.tab));}});
-function openChart(ticker,name){{document.getElementById('chartTitle').textContent=name+' ('+ticker+')';const symbol=ticker.includes(':')?ticker.split(':')[1]:ticker;document.getElementById('chartFrame').src='https://www.tradingview.com/widgetembed/?symbol='+symbol+'&interval=D&theme=dark';document.getElementById('chartModal').classList.add('active');}}
-function closeChart(){{document.getElementById('chartModal').classList.remove('active');document.getElementById('chartFrame').src='';}}
-document.addEventListener('keydown',e=>{{if(e.key==='Escape')closeChart();}});
+function showTab(name){{
+    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+    document.querySelectorAll('.content').forEach(c=>c.classList.remove('active'));
+    document.querySelector(`.tab[onclick="showTab(\'${name}\')"]`).classList.add('active');
+    document.getElementById(name).classList.add('active');
+}}
+function openChart(ticker, name){{
+    window.open(`https://www.tradingview.com/chart/?symbol=${ticker}`, '_blank');
+}}
 </script>
 </body>
 </html>'''
     return html
 
-if __name__ == "__main__":
-    print("Fetching data...")
-    start = time.time()
-    df, spy_perf = get_all_stocks()
-    print(f"Got {len(df)} stocks")
-    
-    vcp = screen_vcp(df)
-    ql = screen_qullamaggie(df)
-    htf = screen_htf(df)
-    print(f"VCP:{len(vcp)} QL:{len(ql)} HTF:{len(htf)}")
-    
-    company_data = get_company_info(df)
-    # Only fetch IV for stocks that will be displayed (VCP/QL/HTF filtered)
-    display_tickers = set(vcp['ticker'].tolist() + ql['ticker'].tolist() + htf['ticker'].tolist())
-    display_df = df[df['ticker'].isin(display_tickers)]
-    iv_data = get_iv_for_stocks(display_df)
-    html = generate_html(vcp, ql, htf, spy_perf, iv_data, company_data)
-    
-    output = 'screener.html'
-    with open(output, 'w') as f:
-        f.write(html)
-    print(f"Done in {time.time()-start:.0f}s: {output}")
+html = generate_html(vcp, ql, htf, spy_perf, iv_data, company_data)
+output = 'screener.html'
+with open(output, 'w') as f:
+    f.write(html)
+print(f"Done in {time.time()-start:.1f}s: {output}")
