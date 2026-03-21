@@ -306,7 +306,7 @@ html = '''<!DOCTYPE html>
 <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
-body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#131722;color:#d1d4dc;min-height:100vh;padding-bottom:20px}}
+body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#131722;color:#d1d4dc;min-height:100vh;padding-bottom:20px;overscroll-behavior:contain}}
 .header{{background:#1e222d;padding:15px;text-align:center;position:sticky;top:0;z-index:100}}
 .header h1{{font-size:18px;color:#2962ff}}
 .header p{{font-size:11px;color:#787b86;margin-top:5px}}
@@ -314,7 +314,7 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 .tab{{flex:1;padding:12px 8px;text-align:center;cursor:pointer;font-size:13px;font-weight:600;color:#787b86;border-bottom:2px solid transparent;transition:all .3s}}
 .tab.active{{color:#2962ff;border-bottom:2px solid #2962ff}}
 .count{{font-size:10px;color:#787b86;margin-top:3px}}
-.content{{display:none;padding:10px}}
+.content{{display:none;padding:10px;overscroll-behavior:contain}}
 .content.active{{display:block}}
 .stock-card{{background:#1e222d;border-radius:12px;padding:14px;margin-bottom:10px;cursor:pointer;transition:all .3s}}
 .stock-card:hover{{background:#262d3f}}
@@ -447,6 +447,9 @@ window.addEventListener('load', function() {{
                         candleSeries.setData(data);
                         chart.timeScale().fitContent();
                         chartInstances[chartId] = chart;
+                        // Block scroll/touch/zoom on chart
+                        container.addEventListener('wheel', function(e) { e.preventDefault(); }, {passive: false});
+                        container.addEventListener('touchmove', function(e) { e.preventDefault(); }, {passive: false});
                         new ResizeObserver(function() {{ chart.applyOptions({{ width: container.clientWidth }}); }}).observe(container);
                     }}
                 }} catch(e) {{}}
