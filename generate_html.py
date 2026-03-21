@@ -415,8 +415,6 @@ function toggleChart(containerId){{
     chartInstances[containerId] = chart;
     
     // Handle resize
-    var resizeObserver = new ResizeObserver(function() {{
-        chart.applyOptions({{ width: container.clientWidth }});
     }});
     resizeObserver.observe(container);
 }}
@@ -437,7 +435,9 @@ window.addEventListener('load', function() {{
                             layout: {{ background: {{ type: 'solid', color: '#1e222d' }}, textColor: '#d1d4dc' }},
                             grid: {{ vertLines: {{ color: '#2a2e39' }}, horzLines: {{ color: '#2a2e39' }} }},
                             timeScale: {{ borderColor: '#2a2e39' }},
-                            rightPriceScale: {{ borderColor: '#2a2e39' }}
+                            rightPriceScale: {{ borderColor: '#2a2e39' }},
+                            handleScroll: false,
+                            handleScale: false
                         }});
                         var candleSeries = chart.addCandlestickSeries({{
                             upColor: '#26a69a', downColor: '#ef5350',
@@ -447,13 +447,6 @@ window.addEventListener('load', function() {{
                         candleSeries.setData(data);
                         chart.timeScale().fitContent();
                         chartInstances[chartId] = chart;
-                        new ResizeObserver(function(entries) {{
-                            var entry = entries[0];
-                            if (entry && entry.contentRect) {{
-                                var newWidth = entry.contentRect.width;
-                                if (newWidth > 0 && newWidth !== container._lastWidth) {{
-                                    container._lastWidth = newWidth;
-                                    chart.applyOptions({{ width: newWidth }});
                                 }}
                             }}
                         }}).observe(container);
