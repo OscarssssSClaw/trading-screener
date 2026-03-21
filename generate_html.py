@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""TradingView Screener HTML Generator - Optimized with direct queries"""
+"""TradingView Screener HTML Generator with Inline Charts"""
 
 import time
 import yfinance as yf
 from tradingview_screener import Query, Column
 import pandas as pd
+import json
 
 start = time.time()
 
@@ -50,7 +51,34 @@ def get_company_info_for_ticker(ticker):
     except:
         return {}
 
-def make_card(row, iv_data, company_data):
+def get_price_history(ticker, days=90):
+    """Get 90 days of OHLCV data"""
+    if ':' not in ticker:
+        return None
+    symbol = ticker.split(':')[1]
+    if ticker.startswith('OTC:'):
+        return None
+    try:
+        t = yf.Ticker(symbol)
+        hist = t.history(period=f"{days}d")
+        if hist.empty or len(hist) < 30:
+            return None
+        
+        # Convert to format for lightweight-charts
+        ohlc = []
+        for idx, row in hist.iterrows():
+            ohlc.append({
+                'time': int(idx.timestamp()),
+                'open': float(row['Open']),
+                'high': float(row['High']),
+                'low': float(row['Low']),
+                'close': float(row['Close'])
+            })
+        return ohlc
+    except:
+        return None
+
+def make_card(row, iv_data, company_data, price_data):
     ticker = str(row['ticker'])
     name = str(row['name']).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
     close = float(row['close'])
@@ -64,7 +92,11 @@ def make_card(row, iv_data, company_data):
     industry = info.get('industry', '')
     desc = info.get('longBusinessSummary', '')
     if desc:
-        desc = desc[:200] + '...'
+        desc = desc[:150] + '...'
+    
+    # Price data for chart
+    chart_id = "chart_" + ticker.replace(':', '_')
+    price_json = json.dumps(price_data.get(ticker, []))
     
     # IV
     if iv:
@@ -93,9 +125,9 @@ def make_card(row, iv_data, company_data):
     perf_color = "positive" if perf_6m > 0 else "negative"
     rs_color = "positive" if rs > 0 else "negative"
     
-    onclick = "openChart('{}', '{}')".format(ticker, name.replace("'", "\\'"))
+    onclick = "toggleChart('{}')".format(chart_id)
     
-    return '''<div class="stock-card" onclick="{}">
+    card = '''<div class="stock-card" onclick="{}">
         <div class="stock-header">
             <div class="stock-info">
                 <div class="stock-name">{}</div>
@@ -128,6 +160,8 @@ def make_card(row, iv_data, company_data):
                 <div class="metric-value {}">{}</div>
             </div>
         </div>
+        <div class="chart-container" id="{}"></div>
+        <script type="text/json" class="chart-data">{}</script>
     </div>'''.format(
         onclick, name, ticker, iv_badge, close,
         sector_html, desc_html,
@@ -135,8 +169,11 @@ def make_card(row, iv_data, company_data):
         perf_color, perf_6m,
         rs_color, rs,
         adr, adr,
-        iv_color_class, iv_str
+        iv_color_class, iv_str,
+        chart_id,
+        price_json
     )
+    return card
 
 print("Fetching VCP stocks directly...")
 try:
@@ -224,31 +261,42 @@ all_tickers = list(set(vcp['ticker'].tolist() + ql['ticker'].tolist() + htf['tic
 print("Total unique tickers: {}".format(len(all_tickers)))
 
 # Fetch IV
-print("Fetching IV for {} stocks...".format(len(all_tickers)))
+print("Fetching IV...")
 iv_data = {}
 for i, ticker in enumerate(all_tickers):
     iv = get_iv_for_ticker(ticker)
     if iv:
         iv_data[ticker] = iv
     if (i + 1) % 10 == 0:
-        print("  {}/{}...".format(i+1, len(all_tickers)))
+        print("  IV: {}/{}".format(i+1, len(all_tickers)))
 print("Got IV for {} stocks".format(len(iv_data)))
 
 # Fetch company info
-print("Fetching company info for {} stocks...".format(len(all_tickers)))
+print("Fetching company info...")
 company_data = {}
 for i, ticker in enumerate(all_tickers):
     info = get_company_info_for_ticker(ticker)
     if info:
         company_data[ticker] = info
     if (i + 1) % 10 == 0:
-        print("  {}/{}...".format(i+1, len(all_tickers)))
+        print("  Info: {}/{}".format(i+1, len(all_tickers)))
 print("Got info for {} companies".format(len(company_data)))
 
+# Fetch price history for charts
+print("Fetching 90-day price history for charts...")
+price_data = {}
+for i, ticker in enumerate(all_tickers):
+    prices = get_price_history(ticker, 90)
+    if prices:
+        price_data[ticker] = prices
+    if (i + 1) % 10 == 0:
+        print("  Charts: {}/{}".format(i+1, len(all_tickers)))
+print("Got price data for {} stocks".format(len(price_data)))
+
 # Generate HTML
-vcp_html = ''.join([make_card(row, iv_data, company_data) for _, row in vcp.head(50).iterrows()])
-ql_html = ''.join([make_card(row, iv_data, company_data) for _, row in ql.head(50).iterrows()])
-htf_html = ''.join([make_card(row, iv_data, company_data) for _, row in htf.head(50).iterrows()])
+vcp_html = ''.join([make_card(row, iv_data, company_data, price_data) for _, row in vcp.head(50).iterrows()])
+ql_html = ''.join([make_card(row, iv_data, company_data, price_data) for _, row in ql.head(50).iterrows()])
+htf_html = ''.join([make_card(row, iv_data, company_data, price_data) for _, row in htf.head(50).iterrows()])
 
 html = '''<!DOCTYPE html>
 <html>
@@ -256,6 +304,7 @@ html = '''<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Trading Screener</title>
+<script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#131722;color:#d1d4dc;min-height:100vh;padding-bottom:20px}}
@@ -275,7 +324,7 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 .stock-name{{font-weight:600;font-size:15px;color:#fff}}
 .stock-ticker{{color:#787b86;font-size:12px;margin-top:2px}}
 .stock-price{{font-size:18px;font-weight:700;color:#fff}}
-.stock-metrics{{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}}
+.stock-metrics{{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:8px}}
 .metric{{text-align:center}}
 .metric-label{{font-size:10px;color:#787b86;margin-bottom:2px}}
 .metric-value{{font-size:13px;font-weight:600}}
@@ -287,12 +336,14 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 .iv-low{{background:#26a69a;color:#fff}}
 .iv-mid{{background:#ef5350;color:#fff}}
 .iv-high{{background:#b71c1c;color:#fff}}
+.chart-container{{display:none;height:200px;margin-top:10px;background:#1e222d;border-radius:8px;overflow:hidden}}
+.chart-container.visible{{display:block}}
 </style>
 </head>
 <body>
 <div class="header">
     <h1>Trading Screener</h1>
-    <p>SPY 6M: {spy_perf:.1f}% | VCP | Qullamaggie | HTF</p>
+    <p>SPY 6M: {spy_perf:.1f}% | Click to toggle 90-day chart</p>
 </div>
 <div class="tabs">
     <div class="tab active" onclick="showTab('vcp')">VCP<span class="count">{vcp_count} stocks</span></div>
@@ -309,9 +360,76 @@ function showTab(name){{
     document.querySelector('.tab[onclick="showTab(\\''+name+'\\')"]').classList.add('active');
     document.getElementById(name).classList.add('active');
 }}
-function openChart(ticker, name){{
-    window.open('https://www.tradingview.com/chart/?symbol=' + ticker, '_blank');
+
+var chartInstances = {{}};
+
+function toggleChart(containerId){{
+    var container = document.getElementById(containerId);
+    if (!container) return;
+    
+    if (container.classList.contains('visible')) {{
+        container.classList.remove('visible');
+        return;
+    }}
+    
+    container.classList.add('visible');
+    
+    if (chartInstances[containerId]) return;
+    
+    var dataEl = container.nextElementSibling;
+    if (!dataEl || !dataEl.classList.contains('chart-data')) return;
+    
+    var data = JSON.parse(dataEl.textContent);
+    if (!data || data.length === 0) return;
+    
+    var chart = LightweightCharts.createChart(container, {{
+        width: container.clientWidth,
+        height: 196,
+        layout: {{
+            background: {{ type: 'solid', color: '#1e222d' }},
+            textColor: '#d1d4dc'
+        }},
+        grid: {{
+            vertLines: {{ color: '#2a2e39' }},
+            horzLines: {{ color: '#2a2e39' }}
+        }},
+        timeScale: {{
+            borderColor: '#2a2e39'
+        }},
+        rightPriceScale: {{
+            borderColor: '#2a2e39'
+        }}
+    }});
+    
+    var candleSeries = chart.addCandlestickSeries({{
+        upColor: '#26a69a',
+        downColor: '#ef5350',
+        borderUpColor: '#26a69a',
+        borderDownColor: '#ef5350',
+        wickUpColor: '#26a69a',
+        wickDownColor: '#ef5350'
+    }});
+    
+    candleSeries.setData(data);
+    chart.timeScale().fitContent();
+    
+    chartInstances[containerId] = chart;
+    
+    // Handle resize
+    var resizeObserver = new ResizeObserver(function() {{
+        chart.applyOptions({{ width: container.clientWidth }});
+    }});
+    resizeObserver.observe(container);
 }}
+
+// Auto-load first chart in each tab on load
+window.addEventListener('load', function() {{
+    var firstCards = document.querySelectorAll('.content.active .stock-card');
+    if (firstCards.length > 0) {{
+        var firstChartId = firstCards[0].querySelector('.chart-container').id;
+        // Don't auto-open, just be ready
+    }}
+}});
 </script>
 </body>
 </html>'''.format(
