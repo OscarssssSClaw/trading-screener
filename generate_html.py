@@ -125,9 +125,8 @@ def make_card(row, iv_data, company_data, price_data):
     perf_color = "positive" if perf_6m > 0 else "negative"
     rs_color = "positive" if rs > 0 else "negative"
     
-    onclick = "toggleChart('{}')".format(chart_id)
     
-    card = '''<div class="stock-card" onclick="{}">
+    card = '''<div class="stock-card">
         <div class="stock-header">
             <div class="stock-info">
                 <div class="stock-name">{}</div>
@@ -163,7 +162,7 @@ def make_card(row, iv_data, company_data, price_data):
         <div class="chart-container" id="{}"></div>
         <script type="text/json" class="chart-data">{}</script>
     </div>'''.format(
-        onclick, name, ticker, iv_badge, close,
+        name, ticker, iv_badge, close,
         sector_html, desc_html,
         dist_color, dist_high,
         perf_color, perf_6m,
@@ -336,7 +335,7 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 .iv-low{{background:#26a69a;color:#fff}}
 .iv-mid{{background:#ef5350;color:#fff}}
 .iv-high{{background:#b71c1c;color:#fff}}
-.chart-container{{display:none;height:200px;margin-top:10px;background:#1e222d;border-radius:8px;overflow:hidden}}
+.chart-container{height:200px;margin-top:10px;background:#1e222d;border-radius:8px;overflow:hidden}}
 .chart-container.visible{{display:block}}
 </style>
 </head>
