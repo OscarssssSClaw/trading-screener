@@ -8,6 +8,136 @@ import pandas as pd
 
 start = time.time()
 
+def get_iv_for_ticker(ticker):
+    if ':' not in ticker:
+        return None
+    symbol = ticker.split(':')[1]
+    if ticker.startswith('OTC:'):
+        return None
+    try:
+        t = yf.Ticker(symbol)
+        stock_price = t.info.get('regularMarketPrice', 0)
+        if stock_price <= 0:
+            return None
+        opt = t.option_chain()
+        if opt.calls is None or len(opt.calls) == 0:
+            return None
+        active = opt.calls[opt.calls['bid'] > 0]
+        if len(active) == 0:
+            return None
+        active = active.copy()
+        active['dist'] = abs(active['strike'] - stock_price)
+        atm_idx = active['dist'].idxmin()
+        iv = active.loc[atm_idx].get('impliedVolatility', 0)
+        return iv if iv > 0 else None
+    except:
+        return None
+
+def get_company_info_for_ticker(ticker):
+    if ':' not in ticker:
+        return {}
+    symbol = ticker.split(':')[1]
+    if ticker.startswith('OTC:'):
+        return {}
+    try:
+        t = yf.Ticker(symbol)
+        info = t.info
+        return {
+            'sector': info.get('sector', ''),
+            'industry': info.get('industry', ''),
+            'longBusinessSummary': info.get('longBusinessSummary', '')
+        }
+    except:
+        return {}
+
+def make_card(row, iv_data, company_data):
+    ticker = str(row['ticker'])
+    name = str(row['name']).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
+    close = float(row['close'])
+    dist_high = float(row['dist_high'])
+    perf_6m = float(row['Perf.6M'])
+    adr = float(row['ADR'])
+    rs = float(row.get('RS', 0))
+    iv = iv_data.get(ticker)
+    info = company_data.get(ticker, {})
+    sector = info.get('sector', '')
+    industry = info.get('industry', '')
+    desc = info.get('longBusinessSummary', '')
+    if desc:
+        desc = desc[:200] + '...'
+    
+    # IV
+    if iv:
+        iv_str = "{:.0f}%".format(iv * 100)
+        iv_color_class = "positive" if iv * 100 < 30 else "negative"
+        iv_badge_class = "iv-low" if iv * 100 < 30 else ("iv-mid" if iv * 100 < 50 else "iv-high")
+        iv_badge = '<span class="iv-badge {}">IV {}</span>'.format(iv_badge_class, iv_str)
+    else:
+        iv_str = "N/A"
+        iv_color_class = ""
+        iv_badge = ""
+    
+    # Sector
+    sector_html = ""
+    if sector:
+        industry_part = " / " + industry if industry else ""
+        sector_html = '<div class="sector">{}{}</div>'.format(sector, industry_part)
+    
+    # Desc
+    desc_html = ""
+    if desc:
+        desc_html = '<div class="company-desc">{}</div>'.format(desc)
+    
+    # Colors
+    dist_color = "positive" if dist_high <= 20 else "negative"
+    perf_color = "positive" if perf_6m > 0 else "negative"
+    rs_color = "positive" if rs > 0 else "negative"
+    
+    onclick = "openChart('{}', '{}')".format(ticker, name.replace("'", "\\'"))
+    
+    return '''<div class="stock-card" onclick="{}">
+        <div class="stock-header">
+            <div class="stock-info">
+                <div class="stock-name">{}</div>
+                <div class="stock-ticker">{}</div>
+                {}
+            </div>
+            <div class="stock-price">${:.2f}</div>
+        </div>
+        {}
+        {}
+        <div class="stock-metrics">
+            <div class="metric">
+                <div class="metric-label">Dist</div>
+                <div class="metric-value {}">{:.1f}%</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">6M</div>
+                <div class="metric-value {}">{:.1f}%</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">RS</div>
+                <div class="metric-value {}">{:.1f}%</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">ADR</div>
+                <div class="metric-value">{:.1f}%</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">IV</div>
+                <div class="metric-value {}">{}</div>
+            </div>
+        </div>
+    </div>'''.format(
+        onclick, name, ticker, iv_badge, close,
+        sector_html, desc_html,
+        dist_color, dist_high,
+        perf_color, perf_6m,
+        rs_color, rs,
+        adr, adr,
+        iv_color_class, iv_str
+    )
+
 print("Fetching VCP stocks directly...")
 try:
     total_vcp, vcp_raw = (
@@ -24,10 +154,10 @@ try:
     vcp_raw['dist_high'] = (vcp_raw['High.All'] - vcp_raw['close']) / vcp_raw['High.All'] * 100
     vcp = vcp_raw[vcp_raw['dist_high'] <= 25].copy().sort_values('volume', ascending=False)
 except Exception as e:
-    print(f"VCP query failed: {e}")
+    print("VCP query failed: {}".format(e))
     vcp = pd.DataFrame()
 
-print(f"VCP: {len(vcp)}")
+print("VCP: {}".format(len(vcp)))
 
 print("Fetching QL stocks directly...")
 try:
@@ -45,10 +175,10 @@ try:
     ql_raw['dist_high'] = (ql_raw['High.All'] - ql_raw['close']) / ql_raw['High.All'] * 100
     ql = ql_raw[ql_raw['dist_high'] <= 15].copy().sort_values('volume', ascending=False)
 except Exception as e:
-    print(f"QL query failed: {e}")
+    print("QL query failed: {}".format(e))
     ql = pd.DataFrame()
 
-print(f"QL: {len(ql)}")
+print("QL: {}".format(len(ql)))
 
 print("Fetching HTF stocks directly...")
 try:
@@ -69,161 +199,62 @@ try:
     htf_raw['dist_high'] = (htf_raw['High.All'] - htf_raw['close']) / htf_raw['High.All'] * 100
     htf = htf_raw[htf_raw['dist_high'] <= 20].copy().sort_values('volume', ascending=False)
 except Exception as e:
-    print(f"HTF query failed: {e}")
+    print("HTF query failed: {}".format(e))
     htf = pd.DataFrame()
 
-print(f"HTF: {len(htf)}")
+print("HTF: {}".format(len(htf)))
 
-# Get SPY performance for reference
+# Get SPY performance
 spy_perf = 0
 try:
     spy_result, spy_df = Query().select('Perf.6M').where(Column('name') == 'SPY').limit(1).get_scanner_data()
     if len(spy_df) > 0:
-        spy_perf = spy_df['Perf.6M'].iloc[0]
+        spy_perf = float(spy_df['Perf.6M'].iloc[0])
 except:
     pass
 
-print(f"SPY 6M: {spy_perf:.1f}%")
+print("SPY 6M: {:.1f}%".format(spy_perf))
 
-# Add RS vs SPY
+# Add RS
 for df in [vcp, ql, htf]:
     df['RS'] = df['Perf.6M'] - spy_perf
 
-# Combine all for IV fetching
-all_stocks = pd.concat([vcp, ql, htf]).drop_duplicates(subset='ticker')
+# Get all unique tickers
+all_tickers = list(set(vcp['ticker'].tolist() + ql['ticker'].tolist() + htf['ticker'].tolist()))
+print("Total unique tickers: {}".format(len(all_tickers)))
 
-def get_iv_for_stocks(tickers):
-    print(f"Fetching IV for {len(tickers)} stocks...")
-    iv_data = {}
-    for i, ticker in enumerate(tickers):
-        if ':' not in ticker:
-            continue
-        symbol = ticker.split(':')[1]
-        if ticker.startswith('OTC:'):
-            continue
-        try:
-            t = yf.Ticker(symbol)
-            info = t.info
-            stock_price = info.get('regularMarketPrice', 0)
-            if stock_price <= 0:
-                continue
-            opt = t.option_chain()
-            if opt.calls is None or len(opt.calls) == 0:
-                continue
-            active = opt.calls[opt.calls['bid'] > 0]
-            if len(active) == 0:
-                continue
-            active = active.copy()
-            active['dist'] = abs(active['strike'] - stock_price)
-            atm_idx = active['dist'].idxmin()
-            iv = active.loc[atm_idx].get('impliedVolatility', 0)
-            if iv > 0:
-                iv_data[ticker] = iv
-        except:
-            pass
-        if (i + 1) % 10 == 0:
-            print(f"  {i+1}/{len(tickers)}...")
-    print(f"Got IV for {len(iv_data)} stocks")
-    return iv_data
-
-def get_company_info(tickers):
-    print(f"Fetching company info for {len(tickers)} stocks...")
-    company_data = {}
-    for i, ticker in enumerate(tickers):
-        if ':' not in ticker:
-            continue
-        symbol = ticker.split(':')[1]
-        if ticker.startswith('OTC:'):
-            continue
-        try:
-            t = yf.Ticker(symbol)
-            info = t.info
-            if info:
-                company_data[ticker] = {
-                    'sector': info.get('sector', ''),
-                    'industry': info.get('industry', ''),
-                    'longBusinessSummary': info.get('longBusinessSummary', '')
-                }
-        except:
-            pass
-        if (i + 1) % 10 == 0:
-            print(f"  {i+1}/{len(tickers)}...")
-    print(f"Got info for {len(company_data)} companies")
-    return company_data
-
-iv_data = get_iv_for_stocks(all_stocks['ticker'].tolist())
-company_data = get_company_info(all_stocks['ticker'].tolist())
-
-def make_card(row, iv_data, company_data):
-    ticker = row['ticker']
-    name = row['name']
-    close = row['close']
-    dist_high = row['dist_high']
-    perf_6m = row['Perf.6M']
-    adr = row['ADR']
-    rs = row.get('RS', 0)
-    iv = iv_data.get(ticker, None)
-    info = company_data.get(ticker, {})
-    sector = info.get('sector', '')
-    industry = info.get('industry', '')
-    desc = info.get('longBusinessSummary', '')[:200] + '...' if info.get('longBusinessSummary') else ''
-    
-    iv_str = f"{iv*100:.0f}%" if iv else "N/A"
-    iv_color = "positive" if iv and iv*100 < 30 else "negative"
-    
-    iv_badge = ""
+# Fetch IV
+print("Fetching IV for {} stocks...".format(len(all_tickers)))
+iv_data = {}
+for i, ticker in enumerate(all_tickers):
+    iv = get_iv_for_ticker(ticker)
     if iv:
-        iv_class = "iv-low" if iv*100 < 30 else ("iv-mid" if iv*100 < 50 else "iv-high")
-        iv_badge = f'<span class="iv-badge {iv_class}">IV {iv*100:.0f}%</span>'
-    
-    sector_html = f'<div class="sector">{sector}{" / " + industry if industry else ""}</div>' if sector else ""
-    desc_html = f'<div class="company-desc">{desc}</div>' if desc else ""
-    
-    return f'''
-    <div class="stock-card" onclick="openChart('{ticker}', '{name}')">
-        <div class="stock-header">
-            <div class="stock-info">
-                <div class="stock-name">{name}</div>
-                <div class="stock-ticker">{ticker}</div>
-                {iv_badge}
-            </div>
-            <div class="stock-price">${close:.2f}</div>
-        </div>
-        {sector_html}
-        {desc_html}
-        <div class="stock-metrics">
-            <div class="metric">
-                <div class="metric-label">Dist</div>
-                <div class="metric-value {"positive" if dist_high <= 20 else "negative"}">{dist_high:.1f}%</div>
-            </div>
-            <div class="metric">
-                <div class="metric-label">6M</div>
-                <div class="metric-value {"positive" if perf_6m > 0 else "negative"}">{perf_6m:.1f}%</div>
-            </div>
-            <div class="metric">
-                <div class="metric-label">RS</div>
-                <div class="metric-value {"positive" if rs > 0 else "negative"}">{rs:.1f}%</div>
-            </div>
-            <div class="metric">
-                <div class="metric-label">ADR</div>
-                <div class="metric-value">{adr:.1f}%</div>
-            </div>
-            <div class="metric">
-                <div class="metric-label">IV</div>
-                <div class="metric-value {iv_color}">{iv_str}</div>
-            </div>
-        </div>
-    </div>'''
+        iv_data[ticker] = iv
+    if (i + 1) % 10 == 0:
+        print("  {}/{}...".format(i+1, len(all_tickers)))
+print("Got IV for {} stocks".format(len(iv_data)))
 
-def generate_html(vcp, ql, htf, spy_perf, iv_data, company_data):
-    vcp_html = ''.join([make_card(row, iv_data, company_data) for _, row in vcp.head(50).iterrows()])
-    ql_html = ''.join([make_card(row, iv_data, company_data) for _, row in ql.head(50).iterrows()])
-    htf_html = ''.join([make_card(row, iv_data, company_data) for _, row in htf.head(50).iterrows()])
-    
-    html = f'''<!DOCTYPE html>
+# Fetch company info
+print("Fetching company info for {} stocks...".format(len(all_tickers)))
+company_data = {}
+for i, ticker in enumerate(all_tickers):
+    info = get_company_info_for_ticker(ticker)
+    if info:
+        company_data[ticker] = info
+    if (i + 1) % 10 == 0:
+        print("  {}/{}...".format(i+1, len(all_tickers)))
+print("Got info for {} companies".format(len(company_data)))
+
+# Generate HTML
+vcp_html = ''.join([make_card(row, iv_data, company_data) for _, row in vcp.head(50).iterrows()])
+ql_html = ''.join([make_card(row, iv_data, company_data) for _, row in ql.head(50).iterrows()])
+htf_html = ''.join([make_card(row, iv_data, company_data) for _, row in htf.head(50).iterrows()])
+
+html = '''<!DOCTYPE html>
 <html>
 <head>
-<meta charset="UTF-8"></meta><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Trading Screener</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
@@ -260,34 +291,39 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 </head>
 <body>
 <div class="header">
-    <h1>📈 Trading Screener</h1>
+    <h1>Trading Screener</h1>
     <p>SPY 6M: {spy_perf:.1f}% | VCP | Qullamaggie | HTF</p>
 </div>
 <div class="tabs">
-    <div class="tab active" onclick="showTab('vcp')">VCP<span class="count">{len(vcp)} stocks</span></div>
-    <div class="tab" onclick="showTab('ql')">Qullamaggie<span class="count">{len(ql)} stocks</span></div>
-    <div class="tab" onclick="showTab('htf')">HTF<span class="count">{len(htf)} stocks</span></div>
+    <div class="tab active" onclick="showTab('vcp')">VCP<span class="count">{vcp_count} stocks</span></div>
+    <div class="tab" onclick="showTab('ql')">Qullamaggie<span class="count">{ql_count} stocks</span></div>
+    <div class="tab" onclick="showTab('htf')">HTF<span class="count">{htf_count} stocks</span></div>
 </div>
 <div id="vcp" class="content active">{vcp_html}</div>
 <div id="ql" class="content">{ql_html}</div>
 <div id="htf" class="content">{htf_html}</div>
 <script>
 function showTab(name){{
-    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
-    document.querySelectorAll('.content').forEach(c=>c.classList.remove('active'));
-    document.querySelector(`.tab[onclick="showTab(\'${name}\')"]`).classList.add('active');
+    document.querySelectorAll('.tab').forEach(function(t){{t.classList.remove('active')}});
+    document.querySelectorAll('.content').forEach(function(c){{c.classList.remove('active')}});
+    document.querySelector('.tab[onclick="showTab(\\''+name+'\\')"]').classList.add('active');
     document.getElementById(name).classList.add('active');
 }}
 function openChart(ticker, name){{
-    window.open(`https://www.tradingview.com/chart/?symbol=${ticker}`, '_blank');
+    window.open('https://www.tradingview.com/chart/?symbol=' + ticker, '_blank');
 }}
 </script>
 </body>
-</html>'''
-    return html
+</html>'''.format(
+    spy_perf=spy_perf,
+    vcp_count=len(vcp),
+    ql_count=len(ql),
+    htf_count=len(htf),
+    vcp_html=vcp_html,
+    ql_html=ql_html,
+    htf_html=htf_html
+)
 
-html = generate_html(vcp, ql, htf, spy_perf, iv_data, company_data)
-output = 'screener.html'
-with open(output, 'w') as f:
+with open('screener.html', 'w') as f:
     f.write(html)
-print(f"Done in {time.time()-start:.1f}s: {output}")
+print("Done in {:.1f}s: screener.html".format(time.time()-start))
