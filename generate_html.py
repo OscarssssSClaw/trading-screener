@@ -365,18 +365,21 @@ function showTab(name){{
     document.querySelectorAll('.tab').forEach(function(t){{t.classList.remove('active')}});
     document.querySelectorAll('.content').forEach(function(c){{c.classList.remove('active')}});
     document.querySelector('.tab[onclick="showTab('+name+')"]').classList.add('active');
-    document.getElementById(name).classList.add('active');
-    // Resize charts in the newly visible tab
+    var tabContent = document.getElementById(name);
+    tabContent.classList.add('active');
+    // Resize charts after a longer delay to allow DOM to render
     setTimeout(function(){{
-        var tabContent = document.getElementById(name);
         var charts = tabContent.querySelectorAll('.chart-container');
         charts.forEach(function(chartDiv){{
             var chartId = chartDiv.id;
             if (chartInstances[chartId]) {{
-                chartInstances[chartId].applyOptions({{width: chartDiv.clientWidth}});
+                var w = chartDiv.clientWidth;
+                if (w > 0) {{
+                    chartInstances[chartId].applyOptions({{width: w}});
+                }}
             }}
         }});
-    }}, 100);
+    }}, 300);
 }}
 
 var chartInstances = {{}};
