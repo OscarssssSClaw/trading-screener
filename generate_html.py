@@ -353,9 +353,9 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
     <p>SPY 6M: {spy_perf:.1f}% | Click to toggle 90-day chart</p>
 </div>
 <div class="tabs">
-    <div class="tab active" onclick="showTab('vcp')">VCP<span class="count">{vcp_count} stocks</span></div>
-    <div class="tab" onclick="showTab('ql')">Qullamaggie<span class="count">{ql_count} stocks</span></div>
-    <div class="tab" onclick="showTab('htf')">HTF<span class="count">{htf_count} stocks</span></div>
+    <div class="tab active" data-tab="vcp" onclick="showTab('vcp')">VCP<span class="count">{vcp_count} stocks</span></div>
+    <div class="tab" data-tab="ql" onclick="showTab('ql')">Qullamaggie<span class="count">{ql_count} stocks</span></div>
+    <div class="tab" data-tab="htf" onclick="showTab('htf')">HTF<span class="count">{htf_count} stocks</span></div>
 </div>
 <div id="vcp" class="content active">{vcp_html}</div>
 <div id="ql" class="content">{ql_html}</div>
@@ -364,22 +364,31 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 function showTab(name){{
     document.querySelectorAll('.tab').forEach(function(t){{t.classList.remove('active')}});
     document.querySelectorAll('.content').forEach(function(c){{c.classList.remove('active')}});
-    document.querySelector('.tab[onclick="showTab('+name+')"]').classList.add('active');
+    // Find and activate the correct tab button
+    var tabs = document.querySelectorAll('.tab');
+    tabs.forEach(function(tab){{
+        if (tab.getAttribute('data-tab') === name) {{
+            tab.classList.add('active');
+        }}
+    }});
+    // Activate the content div
     var tabContent = document.getElementById(name);
-    tabContent.classList.add('active');
-    // Resize charts after a longer delay to allow DOM to render
-    setTimeout(function(){{
-        var charts = tabContent.querySelectorAll('.chart-container');
-        charts.forEach(function(chartDiv){{
-            var chartId = chartDiv.id;
-            if (chartInstances[chartId]) {{
-                var w = chartDiv.clientWidth;
-                if (w > 0) {{
-                    chartInstances[chartId].applyOptions({{width: w}});
+    if (tabContent) {{
+        tabContent.classList.add('active');
+        // Resize charts after delay
+        setTimeout(function(){{
+            var charts = tabContent.querySelectorAll('.chart-container');
+            charts.forEach(function(chartDiv){{
+                var chartId = chartDiv.id;
+                if (chartInstances[chartId]) {{
+                    var w = chartDiv.clientWidth;
+                    if (w > 0) {{
+                        chartInstances[chartId].applyOptions({{width: w}});
+                    }}
                 }}
-            }}
-        }});
-    }}, 300);
+            }});
+        }}, 300);
+    }}
 }}
 
 var chartInstances = {{}};
