@@ -64,17 +64,18 @@ def get_price_history(ticker, days=90):
         if hist.empty or len(hist) < 30:
             return None
         
-        # Convert to format for lightweight-charts
-        ohlc = []
+        # Convert to format for lightweight-charts with volume
+        data = []
         for idx, row in hist.iterrows():
-            ohlc.append({
+            data.append({
                 'time': int(idx.timestamp()),
                 'open': float(row['Open']),
                 'high': float(row['High']),
                 'low': float(row['Low']),
-                'close': float(row['Close'])
+                'close': float(row['Close']),
+                'volume': int(row['Volume']) if 'Volume' in row else 0
             })
-        return ohlc
+        return data
     except:
         return None
 
@@ -256,7 +257,14 @@ for df in [vcp, ql, htf]:
     df['RS'] = df['Perf.6M'] - spy_perf
 
 # Get all unique tickers
-all_tickers = list(set(vcp['ticker'].tolist() + ql['ticker'].tolist() + htf['ticker'].tolist()))
+# Sort all stocks by RS (high to low)
+all_df = pd.concat([vcp, ql, htf]).drop_duplicates(subset='ticker')
+all_df = all_df.sort_values('RS', ascending=False)
+all_tickers = all_df['ticker'].tolist()
+# Re-sort each strategy by RS
+vcp = vcp.sort_values('RS', ascending=False)
+ql = ql.sort_values('RS', ascending=False)
+htf = htf.sort_values('RS', ascending=False)
 print("Total unique tickers: {}".format(len(all_tickers)))
 
 # Fetch IV
@@ -335,7 +343,7 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 .iv-low{{background:#26a69a;color:#fff}}
 .iv-mid{{background:#ef5350;color:#fff}}
 .iv-high{{background:#b71c1c;color:#fff}}
-.chart-container{{height:200px;margin-top:10px;background:#1e222d;border-radius:8px;overflow:hidden;contain:layout style;transform:translateZ(0);will-change:transform;touch-action:none}}
+.chart-container{{height:220px;margin-top:10px;background:#1e222d;border-radius:8px;overflow:hidden;contain:layout style;transform:translateZ(0);will-change:transform;touch-action:none}}
 .chart-container.visible{{display:block}}
 </style>
 </head>
