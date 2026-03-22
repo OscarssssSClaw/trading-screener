@@ -364,6 +364,21 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 function showTab(name){{
     document.querySelectorAll('.tab').forEach(function(t){{t.classList.remove('active')}});
     document.querySelectorAll('.content').forEach(function(c){{c.classList.remove('active')}});
+    document.querySelector('.tab[onclick="showTab(\'+name+'\')"]').classList.add('active');
+    document.getElementById(name).classList.add('active');
+    // Resize charts in the newly visible tab
+    setTimeout(function(){{
+        var tabContent = document.getElementById(name);
+        var charts = tabContent.querySelectorAll('.chart-container');
+        charts.forEach(function(chartDiv){{
+            var chartId = chartDiv.id;
+            if (chartInstances[chartId]) {{
+                chartInstances[chartId].applyOptions({{width: chartDiv.clientWidth}});
+            }}
+        }});
+    }}, 100);
+}});
+    document.querySelectorAll('.content').forEach(function(c){{c.classList.remove('active')}});
     document.querySelector('.tab[onclick="showTab(\\''+name+'\\')"]').classList.add('active');
     document.getElementById(name).classList.add('active');
 }}
