@@ -322,8 +322,10 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 .tab{{flex:1;padding:12px 8px;text-align:center;cursor:pointer;font-size:13px;font-weight:600;color:#787b86;border-bottom:2px solid transparent;transition:all .3s}}
 .tab.active{{color:#2962ff;border-bottom:2px solid #2962ff}}
 .count{{font-size:10px;color:#787b86;margin-top:3px}}
-.content{{display:none;padding:10px;overscroll-behavior:contain}}
-.content.active{{display:block}}
+.tabs{{position:relative;z-index:10}}
+.content{{position:absolute;top:0;left:0;right:0;padding:10px;overscroll-behavior:contain;background:#131722}}
+.content:not(.active){{visibility:hidden;z-index:1}}
+.content.active{{visibility:visible;z-index:2}}
 .stock-card{{background:#1e222d;border-radius:12px;padding:14px;margin-bottom:10px;cursor:pointer;transition:all .3s}}
 .stock-card:hover{{background:#262d3f}}
 .stock-header{{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px}}
@@ -362,32 +364,19 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 <div id="htf" class="content">{htf_html}</div>
 <script>
 function showTab(name){{
+    // Remove active from all tabs and contents
     document.querySelectorAll('.tab').forEach(function(t){{t.classList.remove('active')}});
     document.querySelectorAll('.content').forEach(function(c){{c.classList.remove('active')}});
-    // Find and activate the correct tab button
+    // Add active to selected tab and content
     var tabs = document.querySelectorAll('.tab');
     tabs.forEach(function(tab){{
         if (tab.getAttribute('data-tab') === name) {{
             tab.classList.add('active');
         }}
     }});
-    // Activate the content div
     var tabContent = document.getElementById(name);
     if (tabContent) {{
         tabContent.classList.add('active');
-        // Resize charts after delay
-        setTimeout(function(){{
-            var charts = tabContent.querySelectorAll('.chart-container');
-            charts.forEach(function(chartDiv){{
-                var chartId = chartDiv.id;
-                if (chartInstances[chartId]) {{
-                    var w = chartDiv.clientWidth;
-                    if (w > 0) {{
-                        chartInstances[chartId].applyOptions({{width: w}});
-                    }}
-                }}
-            }});
-        }}, 300);
     }}
 }}
 
