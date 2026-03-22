@@ -343,7 +343,7 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 .iv-low{{background:#26a69a;color:#fff}}
 .iv-mid{{background:#ef5350;color:#fff}}
 .iv-high{{background:#b71c1c;color:#fff}}
-.chart-container{{height:220px;margin-top:10px;background:#1e222d;border-radius:8px;overflow:hidden;contain:layout style;transform:translateZ(0);will-change:transform;touch-action:none}}
+.chart-container{{height:220px;width:100%;min-width:300px;margin-top:10px;background:#1e222d;border-radius:8px;overflow:hidden;contain:layout style;transform:translateZ(0);will-change:transform;touch-action:none}}
 .chart-container.visible{{display:block}}
 </style>
 </head>
