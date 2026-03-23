@@ -446,7 +446,7 @@ function toggleChart(containerId){{
     if (!data || data.length === 0) return;
     
     var chart = LightweightCharts.createChart(container, {{
-        width: container.clientWidth,
+        width: container.getBoundingClientRect().width || 400,
         height: 196,
         layout: {{
             background: {{ type: 'solid', color: '#1e222d' }},
@@ -506,7 +506,7 @@ window.addEventListener('load', function() {{
                     var data = JSON.parse(dataEl.textContent);
                     if (data && data.length > 0) {{
                         var chart = LightweightCharts.createChart(container, {{
-                            width: container.clientWidth,
+                            width: container.getBoundingClientRect().width || 400,
                             height: 196,
                             layout: {{ background: {{ type: 'solid', color: '#1e222d' }}, textColor: '#d1d4dc' }},
                             grid: {{ vertLines: {{ color: '#2a2e39' }}, horzLines: {{ color: '#2a2e39' }} }},
