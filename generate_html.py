@@ -246,40 +246,50 @@ function createChart(container, data) {{
     return chart;
 }}
 
-function initCharts() {{
-    document.querySelectorAll('.chart-cell').forEach(function(cell) {{
-        var chartId = cell.id;
-        var dataEl = cell.nextElementSibling;
-        if (dataEl && dataEl.classList.contains('chart-data')) {{
-            try {{
-                var data = JSON.parse(dataEl.textContent);
-                if (data && data.length > 0) {{
-                    var chart = createChart(cell, data);
-                    if (chart) {{ chartInstances[chartId] = chart; }}
-                }}
-            }} catch(e) {{}}
+function createChartForCell(cell) {{
+    var chartId = cell.id;
+    if (chartInstances[chartId]) return; // Already created
+    
+    var dataEl = cell.nextElementSibling;
+    if (!dataEl || !dataEl.classList.contains('chart-data')) return;
+    
+    try {{
+        var data = JSON.parse(dataEl.textContent);
+        if (!data || data.length === 0) return;
+        
+        var chart = createChart(cell, data);
+        if (chart) {{
+            chartInstances[chartId] = chart;
         }}
-    }});
-    // Show all rows initially
-    document.querySelectorAll('.stock-row').forEach(function(row) {{ row.classList.add('visible'); }});
+    }} catch(e) {{}}
 }}
 
+function showRowsForFilter(filter) {{
+    document.querySelectorAll('.stock-row').forEach(function(row) {{
+        if (filter === 'all' || row.getAttribute('data-strategy') === filter) {{
+            row.classList.add('visible');
+            // Create chart when row becomes visible
+            var chartCell = row.querySelector('.chart-cell');
+            if (chartCell) {{
+                createChartForCell(chartCell);
+            }}
+        }} else {{
+            row.classList.remove('visible');
+        }}
+    }});
+}}
+
+// Initialize - show "All" filter
 document.querySelectorAll('.filter-btn').forEach(function(btn) {{
     btn.addEventListener('click', function() {{
         document.querySelectorAll('.filter-btn').forEach(function(b) {{ b.classList.remove('active'); }});
         btn.classList.add('active');
-        var filter = btn.getAttribute('data-filter');
-        document.querySelectorAll('.stock-row').forEach(function(row) {{
-            if (filter === 'all' || row.getAttribute('data-strategy') === filter) {{
-                row.classList.add('visible');
-            }} else {{
-                row.classList.remove('visible');
-            }}
-        }});
+        showRowsForFilter(btn.getAttribute('data-filter'));
     }});
 }});
 
-window.addEventListener('load', initCharts);
+// Show all rows on load
+showRowsForFilter('all');
 </script>
 </body>
 </html>
