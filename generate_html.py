@@ -383,6 +383,13 @@ function showTab(name){{
 
 var chartInstances = {{}};
 
+document.addEventListener('DOMContentLoaded', function() {{
+    var activeTab = document.querySelector('.content.active');
+    if (activeTab) {{
+        createChartsForContainer(activeTab);
+    }}
+}});
+
 function createChartsForContainer(container){{
     var chartDivs = container.querySelectorAll('.chart-container');
     chartDivs.forEach(function(chartDiv){{
