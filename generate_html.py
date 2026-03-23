@@ -324,7 +324,7 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 .count{{font-size:10px;color:#787b86;margin-top:3px}}
 .tabs{{position:sticky;top:60px;z-index:100;background:#1e222d}}
 .content{{padding:10px;overscroll-behavior:contain;background:#131722;min-height:calc(100vh - 120px);position:relative}}
-.content:not(.active){{opacity:0;pointer-events:none;position:absolute;left:-9999px}}
+.content:not(.active){{opacity:0;pointer-events:none;visibility:hidden}}
 .stock-card{{background:#1e222d;border-radius:12px;padding:14px;margin-bottom:10px;min-height:100px;cursor:pointer;transition:all .3s}}
 .stock-card:hover{{background:#262d3f}}
 .stock-header{{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px}}
@@ -387,7 +387,44 @@ function resizeAllChartsInContainer(container){{
     var charts = container.querySelectorAll('.chart-container');
     charts.forEach(function(chartDiv){{
         var chartId = chartDiv.id;
-        if (chartInstances[chartId]) {{
+        if (!chartInstances[chartId]) {{
+            // Create chart if it doesn't exist
+            var dataEl = chartDiv.nextElementSibling;
+            if (dataEl && dataEl.classList.contains('chart-data')) {{
+                try {{
+                    var data = JSON.parse(dataEl.textContent);
+                    if (data && data.length > 0) {{
+                        var chart = LightweightCharts.createChart(chartDiv, {{
+                            width: chartDiv.getBoundingClientRect().width || 400,
+                            height: 196,
+                            layout: {{ background: {{ type: 'solid', color: '#1e222d' }}, textColor: '#d1d4dc' }},
+                            grid: {{ vertLines: {{ color: '#2a2e39' }}, horzLines: {{ color: '#2a2e39' }} }},
+                            timeScale: {{ borderColor: '#2a2e39' }},
+                            rightPriceScale: {{ borderColor: '#2a2e39' }}
+                        }});
+                        var candleSeries = chart.addCandlestickSeries({{
+                            upColor: '#26a69a', downColor: '#ef5350',
+                            borderUpColor: '#26a69a', borderDownColor: '#ef5350',
+                            wickUpColor: '#26a69a', wickDownColor: '#ef5350'
+                        }});
+                        candleSeries.setData(data);
+                        
+                        // Add volume histogram
+                        var volData = data.map(function(d) {{ return {{ time: d.time, value: d.volume || 0, color: d.close >= d.open ? '#26a69a80' : '#ef535080' }}; }});
+                        var volSeries = chart.addHistogramSeries({{
+                            priceFormat: {{ type: 'volume' }},
+                            priceScaleId: ''
+                        }});
+                        volSeries.setData(volData);
+                        volSeries.priceScale().applyOptions({{ scaleMargins: {{ top: 0.85, bottom: 0 }} }});
+                        
+                        chart.timeScale().fitContent();
+                        chartInstances[chartId] = chart;
+                    }}
+                }} catch(e) {{}}
+            }}
+        }} else {{
+            // Chart exists, just resize it
             chartInstances[chartId].resize();
         }}
     }});
