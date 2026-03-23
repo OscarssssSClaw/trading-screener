@@ -322,9 +322,9 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 .tab{{flex:1;padding:12px 8px;text-align:center;cursor:pointer;font-size:13px;font-weight:600;color:#787b86;border-bottom:2px solid transparent;transition:all .3s}}
 .tab.active{{color:#2962ff;border-bottom:2px solid #2962ff}}
 .count{{font-size:10px;color:#787b86;margin-top:3px}}
-.tabs{{position:relative;z-index:10}}
-.content{{position:absolute;top:0;left:0;right:0;padding:10px;overscroll-behavior:contain;background:#131722;visibility:hidden;z-index:1}}
-.content.active{{visibility:visible;z-index:2}}
+.tabs{{position:sticky;top:60px;z-index:100;background:#1e222d}}
+.content{{padding:10px;overscroll-behavior:contain;background:#131722;min-height:calc(100vh - 120px)}}
+.content:not(.active){{display:none}}
 .stock-card{{background:#1e222d;border-radius:12px;padding:14px;margin-bottom:10px;cursor:pointer;transition:all .3s}}
 .stock-card:hover{{background:#262d3f}}
 .stock-header{{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px}}
@@ -365,61 +365,66 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 function showTab(name){{
     // Remove active from all tabs
     document.querySelectorAll('.tab').forEach(function(t){{t.classList.remove('active')}});
-    // Remove active from all content
     document.querySelectorAll('.content').forEach(function(c){{c.classList.remove('active')}});
-    // Find and activate the correct tab
+    // Add active to correct tab and content
     var tabs = document.querySelectorAll('.tab');
     tabs.forEach(function(tab){{
         if (tab.getAttribute('data-tab') === name) {{
             tab.classList.add('active');
         }}
     }});
-    // Activate the correct content
     var tabContent = document.getElementById(name);
     if (tabContent) {{
         tabContent.classList.add('active');
-        // Force resize after a delay
-        setTimeout(function(){{resizeAllChartsInContainer(tabContent);}}, 50);
+        // Create charts for this tab if not already created
+        createChartsForContainer(tabContent);
     }}
 }}
 
-function resizeAllChartsInContainer(container){{
-    var charts = container.querySelectorAll('.chart-container');
-    charts.forEach(function(chartDiv){{
+var chartInstances = {{}};
+
+function createChartsForContainer(container){{
+    var chartDivs = container.querySelectorAll('.chart-container');
+    chartDivs.forEach(function(chartDiv){{
         var chartId = chartDiv.id;
-        if (chartInstances[chartId]) {{
-            var chart = chartInstances[chartId];
-            var w = chartDiv.clientWidth;
-            if (w > 0) {{
-                chart.applyOptions({{width: w}});
-                chart.resize(w, chartDiv.clientHeight || 196);
+        if (!chartInstances[chartId]) {{
+            var dataEl = chartDiv.nextElementSibling;
+            if (dataEl && dataEl.classList.contains('chart-data')) {{
+                try {{
+                    var data = JSON.parse(dataEl.textContent);
+                    if (data && data.length > 0) {{
+                        var chart = LightweightCharts.createChart(chartDiv, {{
+                            width: chartDiv.clientWidth || 300,
+                            height: 196,
+                            layout: {{ background: {{ type: 'solid', color: '#1e222d' }}, textColor: '#d1d4dc' }},
+                            grid: {{ vertLines: {{ color: '#2a2e39' }}, horzLines: {{ color: '#2a2e39' }} }},
+                            timeScale: {{ borderColor: '#2a2e39' }},
+                            rightPriceScale: {{ borderColor: '#2a2e39' }}
+                        }});
+                        var candleSeries = chart.addCandlestickSeries({{
+                            upColor: '#26a69a', downColor: '#ef5350',
+                            borderUpColor: '#26a69a', borderDownColor: '#ef5350',
+                            wickUpColor: '#26a69a', wickDownColor: '#ef5350'
+                        }});
+                        candleSeries.setData(data);
+                        
+                        // Add volume
+                        var volData = data.map(function(d) {{ return {{ time: d.time, value: d.volume || 0, color: d.close >= d.open ? '#26a69a80' : '#ef535080' }}; }});
+                        var volSeries = chart.addHistogramSeries({{
+                            priceFormat: {{ type: 'volume' }},
+                            priceScaleId: ''
+                        }});
+                        volSeries.setData(volData);
+                        volSeries.priceScale().applyOptions({{ scaleMargins: {{ top: 0.85, bottom: 0 }} }});
+                        
+                        chart.timeScale().fitContent();
+                        chartInstances[chartId] = chart;
+                    }}
+                }} catch(e) {{ console.error('Chart error:', e); }}
             }}
         }}
     }});
 }}
-
-// MutationObserver to detect visibility changes and resize charts
-function setupVisibilityObserver(){{
-    var observer = new MutationObserver(function(mutations) {{
-        mutations.forEach(function(mutation) {{
-            if (mutation.type === 'attributes' && mutation.attributeName === 'class') {{
-                var el = mutation.target;
-                if (el.classList.contains('active') && el.classList.contains('content')) {{
-                    setTimeout(function(){{resizeAllChartsInContainer(el);}}, 100);
-                }}
-            }}
-        }});
-    }});
-    
-    document.querySelectorAll('.content').forEach(function(content) {{
-        observer.observe(content, {{attributes: true}});
-    }});
-}}
-
-// Run setup after DOM is ready
-document.addEventListener('DOMContentLoaded', setupVisibilityObserver);
-
-var chartInstances = {{}};
 
 function toggleChart(containerId){{
     var container = document.getElementById(containerId);
