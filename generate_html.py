@@ -363,27 +363,61 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 <div id="htf" class="content">{htf_html}</div>
 <script>
 function showTab(name){{
+    // Remove active from all tabs
     document.querySelectorAll('.tab').forEach(function(t){{t.classList.remove('active')}});
+    // Remove active from all content
     document.querySelectorAll('.content').forEach(function(c){{c.classList.remove('active')}});
-    // Use data-tab to find correct tab button
-    document.querySelectorAll('.tab').forEach(function(tab){{
+    // Find and activate the correct tab
+    var tabs = document.querySelectorAll('.tab');
+    tabs.forEach(function(tab){{
         if (tab.getAttribute('data-tab') === name) {{
             tab.classList.add('active');
         }}
     }});
-    document.getElementById(name).classList.add('active');
-    // Resize charts in the newly visible tab
-    setTimeout(function(){{
-        var tabContent = document.getElementById(name);
-        var charts = tabContent.querySelectorAll('.chart-container');
-        charts.forEach(function(chartDiv){{
-            var chartId = chartDiv.id;
-            if (chartInstances[chartId]) {{
-                chartInstances[chartId].applyOptions({{width: chartDiv.clientWidth}});
+    // Activate the correct content
+    var tabContent = document.getElementById(name);
+    if (tabContent) {{
+        tabContent.classList.add('active');
+        // Force resize after a delay
+        setTimeout(function(){{resizeAllChartsInContainer(tabContent);}}, 50);
+    }}
+}}
+
+function resizeAllChartsInContainer(container){{
+    var charts = container.querySelectorAll('.chart-container');
+    charts.forEach(function(chartDiv){{
+        var chartId = chartDiv.id;
+        if (chartInstances[chartId]) {{
+            var chart = chartInstances[chartId];
+            var w = chartDiv.clientWidth;
+            if (w > 0) {{
+                chart.applyOptions({{width: w}});
+                chart.resize(w, chartDiv.clientHeight || 196);
+            }}
+        }}
+    }});
+}}
+
+// MutationObserver to detect visibility changes and resize charts
+function setupVisibilityObserver(){{
+    var observer = new MutationObserver(function(mutations) {{
+        mutations.forEach(function(mutation) {{
+            if (mutation.type === 'attributes' && mutation.attributeName === 'class') {{
+                var el = mutation.target;
+                if (el.classList.contains('active') && el.classList.contains('content')) {{
+                    setTimeout(function(){{resizeAllChartsInContainer(el);}}, 100);
+                }}
             }}
         }});
-    }}, 100);
+    }});
+    
+    document.querySelectorAll('.content').forEach(function(content) {{
+        observer.observe(content, {{attributes: true}});
+    }});
 }}
+
+// Run setup after DOM is ready
+document.addEventListener('DOMContentLoaded', setupVisibilityObserver);
 
 var chartInstances = {{}};
 
