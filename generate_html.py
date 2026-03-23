@@ -377,11 +377,21 @@ function showTab(name){{
     if (tabContent) {{
         tabContent.classList.add('active');
         // Create charts for this tab if not already created
-        createChartsForContainer(tabContent);
+        resizeAllChartsInContainer(tabContent);
     }}
 }}
 
 var chartInstances = {{}};
+
+function resizeAllChartsInContainer(container){{
+    var charts = container.querySelectorAll('.chart-container');
+    charts.forEach(function(chartDiv){{
+        var chartId = chartDiv.id;
+        if (chartInstances[chartId]) {{
+            chartInstances[chartId].resize();
+        }}
+    }});
+}}
 
 function createChartsForContainer(container){{
     var chartDivs = container.querySelectorAll('.chart-container');
