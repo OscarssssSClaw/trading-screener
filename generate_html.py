@@ -364,7 +364,12 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 function showTab(name){{
     document.querySelectorAll('.tab').forEach(function(t){{t.classList.remove('active')}});
     document.querySelectorAll('.content').forEach(function(c){{c.classList.remove('active')}});
-    document.querySelector('.tab[onclick="showTab('+name+')"]').classList.add('active');
+    // Use data-tab to find correct tab button
+    document.querySelectorAll('.tab').forEach(function(tab){{
+        if (tab.getAttribute('data-tab') === name) {{
+            tab.classList.add('active');
+        }}
+    }});
     document.getElementById(name).classList.add('active');
     // Resize charts in the newly visible tab
     setTimeout(function(){{
