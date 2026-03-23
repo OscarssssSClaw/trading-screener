@@ -323,8 +323,8 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 .tab.active{{color:#2962ff;border-bottom:2px solid #2962ff}}
 .count{{font-size:10px;color:#787b86;margin-top:3px}}
 .tabs{{position:sticky;top:60px;z-index:100;background:#1e222d}}
-.content{{padding:10px;overscroll-behavior:contain;background:#131722;min-height:calc(100vh - 120px)}}
-.content:not(.active){{visibility:hidden;height:0;overflow:hidden}}
+.content{{padding:10px;overscroll-behavior:contain;background:#131722;min-height:calc(100vh - 120px);position:relative}}
+.content:not(.active){{opacity:0;pointer-events:none;position:absolute;left:-9999px}}
 .stock-card{{background:#1e222d;border-radius:12px;padding:14px;margin-bottom:10px;min-height:100px;cursor:pointer;transition:all .3s}}
 .stock-card:hover{{background:#262d3f}}
 .stock-header{{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px}}
