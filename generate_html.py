@@ -145,6 +145,12 @@ all_stocks['is_htf'] = all_stocks['is_htf'].fillna(False).astype(bool)
 # Add RS
 all_stocks['RS'] = all_stocks['Perf.6M'] - spy_perf
 
+# Filter out stocks with invalid names (NaN or empty)
+all_stocks = all_stocks[all_stocks['name'].notna()]
+all_stocks = all_stocks[all_stocks['name'] != '']
+all_stocks = all_stocks[all_stocks['name'].astype(str) != 'nan']
+all_stocks = all_stocks[all_stocks['name'].astype(str) != 'None']
+
 print(f"Total unique stocks: {len(all_stocks)}")
 vcp_count = int(all_stocks['is_vcp'].sum())
 ql_count = int(all_stocks['is_ql'].sum())
