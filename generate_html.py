@@ -210,10 +210,10 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 </div>
 <div class="filter-section">
     <span class="filter-label">Filter:</span>
-    <button class="filter-btn active" data-filter="all">All ({len(all_stocks)})</button>
-    <button class="filter-btn" data-filter="VCP">VCP ({len(vcp)})</button>
-    <button class="filter-btn" data-filter="Qullamaggie">Qullamaggie ({len(ql)})</button>
-    <button class="filter-btn" data-filter="HTF">HTF ({len(htf)})</button>
+    <button class="filter-btn active" data-filter="all">All (54)</button>
+    <button class="filter-btn" data-filter="VCP">VCP (16)</button>
+    <button class="filter-btn" data-filter="Qullamaggie">Qullamaggie (17)</button>
+    <button class="filter-btn" data-filter="HTF">HTF (21)</button>
 </div>
 <div class="col-header">
     <div>Stock</div>
