@@ -317,6 +317,16 @@ function createChart(container, data) {{
         wickUpColor: '#26a69a', wickDownColor: '#ef5350'
     }});
     candleSeries.setData(data);
+    
+    // Add volume histogram
+    var volData = data.map(function(d) {{ return {{ time: d.time, value: d.volume || 0, color: d.close >= d.open ? '#26a69a80' : '#ef535080' }}; }});
+    var volSeries = chart.addHistogramSeries({{
+        priceFormat: {{ type: 'volume' }},
+        priceScaleId: ''
+    }});
+    volSeries.setData(volData);
+    volSeries.priceScale().applyOptions({{ scaleMargins: {{ top: 0.85, bottom: 0 }} }});
+    
     chart.timeScale().fitContent();
     return chart;
 }}
