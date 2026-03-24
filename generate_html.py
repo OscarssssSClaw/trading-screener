@@ -183,7 +183,7 @@ def make_row(row, price_data):
     chart_id = "chart_" + ticker.replace(':', '_')
     price_json = json.dumps(price_data.get(ticker, []))
     iv_val = iv_data.get(ticker)
-    if iv_val is not None:
+    if iv_val is not None and iv_val > 0:
         iv_str = f"{iv_val:.0f}%"
         if iv_val >= 100:
             iv_class = "high"
