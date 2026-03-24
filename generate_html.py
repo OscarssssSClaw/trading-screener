@@ -9,6 +9,31 @@ import json
 
 start = time.time()
 
+def get_iv_for_ticker(ticker):
+    if ':' not in ticker:
+        return None
+    symbol = ticker.split(':')[1]
+    if symbol.startswith('OTC.'):
+        return None
+    try:
+        t = yf.Ticker(symbol)
+        stock_price = t.info.get('regularMarketPrice', 0)
+        if stock_price <= 0:
+            return None
+        opt = t.option_chain()
+        if opt.calls is None or len(opt.calls) == 0:
+            return None
+        active = opt.calls[opt.calls['bid'] > 0]
+        if len(active) == 0:
+            return None
+        active = active.copy()
+        active['dist'] = abs(active['strike'] - stock_price)
+        atm_idx = active['dist'].idxmin()
+        iv = active.loc[atm_idx].get('impliedVolatility', 0)
+        return iv * 100 if iv > 0 else None
+    except:
+        return None
+
 def get_price_history(ticker, days=90):
     if ':' not in ticker:
         return None
@@ -137,6 +162,16 @@ for i, ticker in enumerate(all_stocks['ticker'].tolist()):
         print(f"  {i+1}/{len(all_stocks)}...")
 print(f"Got price data for {len(price_data)} stocks")
 
+print("Fetching IV data...")
+iv_data = {}
+for i, ticker in enumerate(all_stocks['ticker'].tolist()):
+    iv = get_iv_for_ticker(ticker)
+    if iv is not None:
+        iv_data[ticker] = iv
+    if (i + 1) % 20 == 0:
+        print(f"  {i+1}/{len(all_stocks)}...")
+print(f"Got IV for {len(iv_data)} stocks")
+
 def make_row(row, price_data):
     ticker = str(row['ticker'])
     name = str(row['name']).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
@@ -147,6 +182,11 @@ def make_row(row, price_data):
     rs = float(row.get('RS', 0))
     chart_id = "chart_" + ticker.replace(':', '_')
     price_json = json.dumps(price_data.get(ticker, []))
+    iv_val = iv_data.get(ticker)
+    if iv_val is not None:
+        iv_str = f"{iv_val:.0f}%"
+    else:
+        iv_str = "-" 
     
     dist_color = "positive" if dist_high <= 20 else "negative"
     perf_color = "positive" if perf_6m > 0 else "negative"
@@ -184,6 +224,7 @@ def make_row(row, price_data):
         <div class="metric">6M<br><span class="{perf_color}">{perf_6m:.1f}%</span></div>
         <div class="metric">RS<br><span class="{rs_color}">{rs:.1f}%</span></div>
         <div class="metric">ADR<br>{adr:.1f}%</div>
+        <div class="metric">IV<br>{iv_str}</div>
         <div class="chart-cell" id="{chart_id}"></div>
         <script type="application/json" class="chart-data">{price_json}</script>
     </div>'''
@@ -246,6 +287,7 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
     <div style="width:60px">6M</div>
     <div style="width:60px">RS</div>
     <div style="width:60px">ADR</div>
+    <div style="width:60px">IV</div>
     <div style="flex:1;min-width:150px">Chart</div>
 </div>
 <div class="content">
