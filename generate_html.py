@@ -13,7 +13,7 @@ def get_iv_for_ticker(ticker):
     if ':' not in ticker:
         return None
     symbol = ticker.split(':')[1]
-    if symbol.startswith('OTC.'):
+    if symbol.startswith('OTC:'):
         return None
     try:
         t = yf.Ticker(symbol)
@@ -183,17 +183,16 @@ def make_row(row, price_data):
     chart_id = "chart_" + ticker.replace(':', '_')
     price_json = json.dumps(price_data.get(ticker, []))
     iv_val = iv_data.get(ticker)
-    if iv_val is not None and iv_val > 0:
-        iv_str = f"{iv_val:.0f}%"
-        if iv_val >= 100:
+    if iv_val is not None and iv_val > 0 and iv_val * 100 >= 1:
+        iv_pct = iv_val  # already * 100
+        if iv_pct >= 100:
             iv_class = "high"
-        elif iv_val >= 50:
+        elif iv_pct >= 50:
             iv_class = "med"
         else:
             iv_class = "low"
-        iv_display = f"{iv_val:.0f}%"
+        iv_display = f"{iv_pct:.0f}%"
     else:
-        iv_str = "-"
         iv_class = "none"
         iv_display = "-"
     sector = str(row.get('sector', '-'))
@@ -253,10 +252,10 @@ html = f'''<!DOCTYPE html>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#131722;color:#d1d4dc;min-height:100vh}}
-.header{{background:#1e222d;padding:15px;position:sticky;top:0;z-index:100;display:flex;justify-content:space-between;align-items:center}}
+.header{{background:#1e222d;padding:12px 15px;position:sticky;top:0;z-index:101;display:flex;justify-content:space-between;align-items:center}}
 .header h1{{font-size:18px;color:#2962ff}}
 .header p{{font-size:11px;color:#787b86}}
-.filter-section{{background:#1e222d;padding:10px 15px;position:sticky;top:60px;z-index:99;border-bottom:1px solid #2a2e39}}
+.filter-section{{background:#1e222d;padding:10px 15px;position:sticky;top:0;z-index:100;border-bottom:1px solid #2a2e39}}
 .filter-label{{color:#787b86;font-size:12px;margin-right:10px}}
 .filter-btn{{background:#262d3f;color:#d1d4dc;border:1px solid #2a2e39;padding:8px 16px;margin-right:8px;cursor:pointer;border-radius:6px;font-size:13px}}
 .filter-btn:hover{{background:#363d52}}
@@ -284,7 +283,7 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 .strategy-badge.strategy-vcp{{background:#2962ff}}
 .strategy-badge.strategy-qullamaggie{{background:#ef5350}}
 .strategy-badge.strategy-htf{{background:#26a69a}}
-.col-header{{display:flex;flex-wrap:wrap;gap:10px;padding:8px 12px;color:#787b86;font-size:11px;font-weight:600;border-bottom:1px solid #2a2e39;position:sticky;top:115px;background:#131722;z-index:98}}
+.col-header{{display:flex;flex-wrap:wrap;gap:10px;padding:8px 12px;color:#787b86;font-size:11px;font-weight:600;border-bottom:1px solid #2a2e39;position:sticky;top:50px;background:#131722;z-index:98}}
 </style>
 </head>
 <body>
