@@ -185,8 +185,17 @@ def make_row(row, price_data):
     iv_val = iv_data.get(ticker)
     if iv_val is not None:
         iv_str = f"{iv_val:.0f}%"
+        if iv_val >= 100:
+            iv_class = "high"
+        elif iv_val >= 50:
+            iv_class = "med"
+        else:
+            iv_class = "low"
+        iv_display = f"{iv_val:.0f}%"
     else:
         iv_str = "-"
+        iv_class = "none"
+        iv_display = "-"
     sector = str(row.get('sector', '-'))
     industry = str(row.get('industry', '-'))
     
@@ -222,12 +231,12 @@ def make_row(row, price_data):
             <div class="stock-ticker">{ticker} {badges_str}</div>
             <div class="stock-sector">{sector} - {industry}</div>
         </div>
-        <div class="stock-price">${close:.2f}</div>
+        <div class="metric iv-metric">IV<br><span class="iv-value iv-{iv_class}">{iv_display}</span></div>
         <div class="metric">Dist<br><span class="{dist_color}">{dist_high:.1f}%</span></div>
         <div class="metric">6M<br><span class="{perf_color}">{perf_6m:.1f}%</span></div>
         <div class="metric">RS<br><span class="{rs_color}">{rs:.1f}%</span></div>
         <div class="metric">ADR<br>{adr:.1f}%</div>
-        <div class="metric">IV<br>{iv_str}</div>
+        <div class="stock-price">${close:.2f}</div>
         <div class="chart-cell" id="{chart_id}"></div>
         <script type="application/json" class="chart-data">{price_json}</script>
     </div>'''
@@ -287,11 +296,11 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 <div class="col-header">
     <div style="flex:1;min-width:150px">Stock</div>
     <div style="width:80px">Price</div>
+    <div style="width:60px">IV</div>
     <div style="width:60px">Dist</div>
     <div style="width:60px">6M</div>
     <div style="width:60px">RS</div>
     <div style="width:60px">ADR</div>
-    <div style="width:60px">IV</div>
     <div style="flex:1;min-width:150px">Chart</div>
 </div>
 <div class="content">
