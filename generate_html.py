@@ -170,6 +170,7 @@ for i, ticker in enumerate(all_stocks['ticker'].tolist()):
         iv_data[ticker] = iv
     if (i + 1) % 20 == 0:
         print(f"  {i+1}/{len(all_stocks)}...")
+    time.sleep(0.1)  # Rate limiting
 print(f"Got IV for {len(iv_data)} stocks")
 
 def make_row(row, price_data):
@@ -183,7 +184,7 @@ def make_row(row, price_data):
     chart_id = "chart_" + ticker.replace(':', '_')
     price_json = json.dumps(price_data.get(ticker, []))
     iv_val = iv_data.get(ticker)
-    if iv_val is not None and iv_val > 0 and iv_val * 100 >= 1:
+    if iv_val is not None and iv_val >= 1:
         iv_pct = iv_val  # already * 100
         if iv_pct >= 100:
             iv_class = "high"
