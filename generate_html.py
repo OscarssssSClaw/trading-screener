@@ -232,11 +232,11 @@ def make_row(row, price_data):
             <div class="stock-sector">{sector} - {industry}</div>
         </div>
         <div class="metric iv-metric">IV<br><span class="iv-value iv-{iv_class}">{iv_display}</span></div>
+        <div class="stock-price">${close:.2f}</div>
         <div class="metric">Dist<br><span class="{dist_color}">{dist_high:.1f}%</span></div>
         <div class="metric">6M<br><span class="{perf_color}">{perf_6m:.1f}%</span></div>
         <div class="metric">RS<br><span class="{rs_color}">{rs:.1f}%</span></div>
         <div class="metric">ADR<br>{adr:.1f}%</div>
-        <div class="stock-price">${close:.2f}</div>
         <div class="chart-cell" id="{chart_id}"></div>
         <script type="application/json" class="chart-data">{price_json}</script>
     </div>'''
