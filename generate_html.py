@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TradingView Screener HTML Generator - Single Page with Dropdown Filter"""
+"""TradingView Screener HTML Generator - Multi-strategy badges on merged stocks"""
 
 import time
 import yfinance as yf
@@ -48,10 +48,9 @@ try:
         .get_scanner_data()
     )
     vcp_raw['dist_high'] = (vcp_raw['High.All'] - vcp_raw['close']) / vcp_raw['High.All'] * 100
-    vcp = vcp_raw[vcp_raw['dist_high'] <= 25].copy().sort_values('volume', ascending=False)
-    vcp['strategy'] = 'VCP'
-except Exception as e:
-    print(f"VCP failed: {e}")
+    vcp = vcp_raw[vcp_raw['dist_high'] <= 25].copy()
+    vcp['is_vcp'] = True
+except:
     vcp = pd.DataFrame()
 
 print(f"VCP: {len(vcp)}")
@@ -70,8 +69,8 @@ try:
         .get_scanner_data()
     )
     ql_raw['dist_high'] = (ql_raw['High.All'] - ql_raw['close']) / ql_raw['High.All'] * 100
-    ql = ql_raw[ql_raw['dist_high'] <= 15].copy().sort_values('volume', ascending=False)
-    ql['strategy'] = 'Qullamaggie'
+    ql = ql_raw[ql_raw['dist_high'] <= 15].copy()
+    ql['is_ql'] = True
 except:
     ql = pd.DataFrame()
 
@@ -94,8 +93,8 @@ try:
         .get_scanner_data()
     )
     htf_raw['dist_high'] = (htf_raw['High.All'] - htf_raw['close']) / htf_raw['High.All'] * 100
-    htf = htf_raw[htf_raw['dist_high'] <= 20].copy().sort_values('volume', ascending=False)
-    htf['strategy'] = 'HTF'
+    htf = htf_raw[htf_raw['dist_high'] <= 20].copy()
+    htf['is_htf'] = True
 except:
     htf = pd.DataFrame()
 
@@ -111,17 +110,23 @@ except:
 
 print(f"SPY 6M: {spy_perf:.1f}%")
 
-for df in [vcp, ql, htf]:
-    df['RS'] = df['Perf.6M'] - spy_perf
+# Merge all three datasets on ticker to get multi-strategy stocks
+all_stocks = vcp.merge(ql[['ticker', 'is_ql']], on='ticker', how='outer')
+all_stocks = all_stocks.merge(htf[['ticker', 'is_htf']], on='ticker', how='outer')
+all_stocks['is_vcp'] = all_stocks['is_vcp'].fillna(False).astype(bool)
+all_stocks['is_ql'] = all_stocks['is_ql'].fillna(False).astype(bool)
+all_stocks['is_htf'] = all_stocks['is_htf'].fillna(False).astype(bool)
 
-# Assign priority: HTF > QL > VCP (HTF is most selective)
-# Add priority column, concat, sort by priority, drop duplicates keeping first
-vcp['priority'] = 3
-ql['priority'] = 2
-htf['priority'] = 1
-all_stocks = pd.concat([vcp, ql, htf]).sort_values('priority').drop_duplicates(subset='ticker', keep='first')
-print(f"Total: {len(all_stocks)}")
+# Add RS
+all_stocks['RS'] = all_stocks['Perf.6M'] - spy_perf
 
+print(f"Total unique stocks: {len(all_stocks)}")
+vcp_count = int(all_stocks['is_vcp'].sum())
+ql_count = int(all_stocks['is_ql'].sum())
+htf_count = int(all_stocks['is_htf'].sum())
+print(f"Actual - VCP: {vcp_count}, QL: {ql_count}, HTF: {htf_count}")
+
+# Get price data for charts
 print("Fetching price history...")
 price_data = {}
 for i, ticker in enumerate(all_stocks['ticker'].tolist()):
@@ -140,20 +145,39 @@ def make_row(row, price_data):
     perf_6m = float(row['Perf.6M'])
     adr = float(row['ADR'])
     rs = float(row.get('RS', 0))
-    strategy = str(row.get('strategy', 'Unknown'))
     chart_id = "chart_" + ticker.replace(':', '_')
     price_json = json.dumps(price_data.get(ticker, []))
     
     dist_color = "positive" if dist_high <= 20 else "negative"
     perf_color = "positive" if perf_6m > 0 else "negative"
     rs_color = "positive" if rs > 0 else "negative"
-    strategy_class = strategy.lower().replace(' ', '-')
+    
+    # Build strategy badges and classes
+    badges = []
+    classes = []
+    strat_list = []
+    if row.get('is_vcp', False):
+        badges.append('<span class="strategy-badge strategy-vcp">VCP</span>')
+        classes.append('strategy-vcp')
+        strat_list.append('VCP')
+    if row.get('is_ql', False):
+        badges.append('<span class="strategy-badge strategy-qullamaggie">Qullamaggie</span>')
+        classes.append('strategy-qullamaggie')
+        strat_list.append('Qullamaggie')
+    if row.get('is_htf', False):
+        badges.append('<span class="strategy-badge strategy-htf">HTF</span>')
+        classes.append('strategy-htf')
+        strat_list.append('HTF')
+    
+    badges_str = ''.join(badges)
+    classes_str = ' '.join(classes)
+    data_strategies = ','.join(strat_list)
     
     return f'''
-    <div class="stock-row strategy-{strategy_class}" data-strategy="{strategy}">
+    <div class="stock-row {classes_str}" data-strategies="{data_strategies}">
         <div class="stock-header">
             <div class="stock-name">{name}</div>
-            <div class="stock-ticker">{ticker} <span class="strategy-badge">{strategy}</span></div>
+            <div class="stock-ticker">{ticker} {badges_str}</div>
         </div>
         <div class="stock-price">${close:.2f}</div>
         <div class="metric">Dist<br><span class="{dist_color}">{dist_high:.1f}%</span></div>
@@ -162,8 +186,7 @@ def make_row(row, price_data):
         <div class="metric">ADR<br>{adr:.1f}%</div>
         <div class="chart-cell" id="{chart_id}"></div>
         <script type="application/json" class="chart-data">{price_json}</script>
-    </div>
-    '''
+    </div>'''
 
 all_rows = ''.join([make_row(row, price_data) for _, row in all_stocks.iterrows()])
 
@@ -188,18 +211,19 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 .content{{padding:15px}}
 .stock-row{{display:none;flex-wrap:wrap;background:#1e222d;border-radius:12px;padding:12px;margin-bottom:8px}}
 .stock-row.visible{{display:flex}}
+.stock-header{{flex:1;min-width:150px}}
 .stock-name{{font-weight:600;font-size:14px;color:#fff}}
 .stock-ticker{{color:#787b86;font-size:11px;margin-top:2px}}
-.stock-price{{font-size:16px;font-weight:700;color:#fff;margin-left:auto}}
+.stock-price{{font-size:16px;font-weight:700;color:#fff;margin-left:10px}}
 .metric{{text-align:center;font-size:11px;color:#787b86;min-width:50px}}
 .metric span{{font-size:13px;font-weight:600}}
 .chart-cell{{flex:1;min-width:150px;height:60px;border-radius:6px;overflow:hidden}}
 .positive{{color:#26a69a}}
 .negative{{color:#ef5350}}
-.strategy-badge{{background:#2962ff;color:#fff;padding:2px 6px;border-radius:4px;font-size:10px;margin-left:8px}}
-.strategy-vcp .strategy-badge{{background:#2962ff}}
-.strategy-qullamaggie .strategy-badge{{background:#ef5350}}
-.strategy-htf .strategy-badge{{background:#26a69a}}
+.strategy-badge{{color:#fff;padding:2px 6px;border-radius:4px;font-size:10px;margin-left:4px}}
+.strategy-badge.strategy-vcp{{background:#2962ff}}
+.strategy-badge.strategy-qullamaggie{{background:#ef5350}}
+.strategy-badge.strategy-htf{{background:#26a69a}}
 .col-header{{display:flex;flex-wrap:wrap;gap:10px;padding:8px 12px;color:#787b86;font-size:11px;font-weight:600;border-bottom:1px solid #2a2e39;position:sticky;top:115px;background:#131722;z-index:98}}
 </style>
 </head>
@@ -210,19 +234,19 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 </div>
 <div class="filter-section">
     <span class="filter-label">Filter:</span>
-    <button class="filter-btn active" data-filter="all">All (54)</button>
-    <button class="filter-btn" data-filter="VCP">VCP (16)</button>
-    <button class="filter-btn" data-filter="Qullamaggie">Qullamaggie (17)</button>
-    <button class="filter-btn" data-filter="HTF">HTF (21)</button>
+    <button class="filter-btn active" data-filter="all">All ({len(all_stocks)})</button>
+    <button class="filter-btn" data-filter="VCP">VCP ({vcp_count})</button>
+    <button class="filter-btn" data-filter="Qullamaggie">Qullamaggie ({ql_count})</button>
+    <button class="filter-btn" data-filter="HTF">HTF ({htf_count})</button>
 </div>
 <div class="col-header">
-    <div>Stock</div>
-    <div>Price</div>
-    <div>Dist</div>
-    <div>6M</div>
-    <div>RS</div>
-    <div>ADR</div>
-    <div>Chart</div>
+    <div style="flex:1;min-width:150px">Stock</div>
+    <div style="width:80px">Price</div>
+    <div style="width:60px">Dist</div>
+    <div style="width:60px">6M</div>
+    <div style="width:60px">RS</div>
+    <div style="width:60px">ADR</div>
+    <div style="flex:1;min-width:150px">Chart</div>
 </div>
 <div class="content">
 {all_rows}
@@ -253,7 +277,7 @@ function createChart(container, data) {{
 
 function createChartForCell(cell) {{
     var chartId = cell.id;
-    if (chartInstances[chartId]) return; // Already created
+    if (chartInstances[chartId]) return;
     
     var dataEl = cell.nextElementSibling;
     if (!dataEl || !dataEl.classList.contains('chart-data')) return;
@@ -271,9 +295,10 @@ function createChartForCell(cell) {{
 
 function showRowsForFilter(filter) {{
     document.querySelectorAll('.stock-row').forEach(function(row) {{
-        if (filter === 'all' || row.getAttribute('data-strategy') === filter) {{
+        var strategies = row.getAttribute('data-strategies') || '';
+        var stratList = strategies.split(',').map(function(s) {{ return s.trim(); }});
+        if (filter === 'all' || stratList.indexOf(filter) !== -1) {{
             row.classList.add('visible');
-            // Create chart when row becomes visible
             var chartCell = row.querySelector('.chart-cell');
             if (chartCell) {{
                 createChartForCell(chartCell);
@@ -284,7 +309,6 @@ function showRowsForFilter(filter) {{
     }});
 }}
 
-// Initialize - show "All" filter
 document.querySelectorAll('.filter-btn').forEach(function(btn) {{
     btn.addEventListener('click', function() {{
         document.querySelectorAll('.filter-btn').forEach(function(b) {{ b.classList.remove('active'); }});
@@ -293,12 +317,10 @@ document.querySelectorAll('.filter-btn').forEach(function(btn) {{
     }});
 }});
 
-// Show all rows on load
 showRowsForFilter('all');
 </script>
 </body>
-</html>
-'''
+</html>'''
 
 with open('screener.html', 'w') as f:
     f.write(html)
