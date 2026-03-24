@@ -114,7 +114,12 @@ print(f"SPY 6M: {spy_perf:.1f}%")
 for df in [vcp, ql, htf]:
     df['RS'] = df['Perf.6M'] - spy_perf
 
-all_stocks = pd.concat([vcp, ql, htf]).drop_duplicates(subset='ticker')
+# Assign priority: HTF > QL > VCP (HTF is most selective)
+# Add priority column, concat, sort by priority, drop duplicates keeping first
+vcp['priority'] = 3
+ql['priority'] = 2
+htf['priority'] = 1
+all_stocks = pd.concat([vcp, ql, htf]).sort_values('priority').drop_duplicates(subset='ticker', keep='first')
 print(f"Total: {len(all_stocks)}")
 
 print("Fetching price history...")
@@ -181,21 +186,21 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 .filter-btn:hover{{background:#363d52}}
 .filter-btn.active{{background:#2962ff;color:#fff;border-color:#2962ff}}
 .content{{padding:15px}}
-.stock-row{{display:none;grid-template-columns:180px 80px repeat(4,60px) 200px;gap:10px;align-items:center;background:#1e222d;border-radius:12px;padding:12px;margin-bottom:8px}}
-.stock-row.visible{{display:grid}}
+.stock-row{{display:none;flex-wrap:wrap;background:#1e222d;border-radius:12px;padding:12px;margin-bottom:8px}}
+.stock-row.visible{{display:flex}}
 .stock-name{{font-weight:600;font-size:14px;color:#fff}}
 .stock-ticker{{color:#787b86;font-size:11px;margin-top:2px}}
-.stock-price{{font-size:16px;font-weight:700;color:#fff}}
-.metric{{text-align:center;font-size:11px;color:#787b86}}
+.stock-price{{font-size:16px;font-weight:700;color:#fff;margin-left:auto}}
+.metric{{text-align:center;font-size:11px;color:#787b86;min-width:50px}}
 .metric span{{font-size:13px;font-weight:600}}
-.chart-cell{{height:60px;border-radius:6px;overflow:hidden}}
+.chart-cell{{flex:1;min-width:150px;height:60px;border-radius:6px;overflow:hidden}}
 .positive{{color:#26a69a}}
 .negative{{color:#ef5350}}
 .strategy-badge{{background:#2962ff;color:#fff;padding:2px 6px;border-radius:4px;font-size:10px;margin-left:8px}}
 .strategy-vcp .strategy-badge{{background:#2962ff}}
 .strategy-qullamaggie .strategy-badge{{background:#ef5350}}
 .strategy-htf .strategy-badge{{background:#26a69a}}
-.col-header{{display:grid;grid-template-columns:180px 80px repeat(4,60px) 200px;gap:10px;padding:8px 12px;color:#787b86;font-size:11px;font-weight:600;border-bottom:1px solid #2a2e39;position:sticky;top:115px;background:#131722;z-index:98}}
+.col-header{{display:flex;flex-wrap:wrap;gap:10px;padding:8px 12px;color:#787b86;font-size:11px;font-weight:600;border-bottom:1px solid #2a2e39;position:sticky;top:115px;background:#131722;z-index:98}}
 </style>
 </head>
 <body>
