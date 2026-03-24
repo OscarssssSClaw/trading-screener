@@ -63,7 +63,7 @@ print("Fetching VCP stocks...")
 try:
     total_vcp, vcp_raw = (
         Query()
-        .select('name', 'close', 'volume', 'ADR', 'Perf.6M', 'SMA20', 'SMA50', 'High.All', 'RSI')
+        .select('name', 'close', 'volume', 'ADR', 'Perf.6M', 'SMA20', 'SMA50', 'High.All', 'RSI', 'sector', 'industry')
         .where(
             Column('volume') > 1_000_000,
             Column('Perf.6M') >= 50,
@@ -84,7 +84,7 @@ print("Fetching QL stocks...")
 try:
     total_ql, ql_raw = (
         Query()
-        .select('name', 'close', 'volume', 'ADR', 'Perf.6M', 'SMA20', 'SMA50', 'High.All', 'RSI')
+        .select('name', 'close', 'volume', 'ADR', 'Perf.6M', 'SMA20', 'SMA50', 'High.All', 'RSI', 'sector', 'industry')
         .where(
             Column('volume') > 1_000_000,
             Column('Perf.6M') >= 50,
@@ -105,7 +105,7 @@ print("Fetching HTF stocks...")
 try:
     total_htf, htf_raw = (
         Query()
-        .select('name', 'close', 'volume', 'ADR', 'Perf.6M', 'SMA20', 'SMA50', 'High.All', 'RSI')
+        .select('name', 'close', 'volume', 'ADR', 'Perf.6M', 'SMA20', 'SMA50', 'High.All', 'RSI', 'sector', 'industry')
         .where(
             Column('volume') > 1_000_000,
             Column('Perf.6M') >= 50,
@@ -186,7 +186,9 @@ def make_row(row, price_data):
     if iv_val is not None:
         iv_str = f"{iv_val:.0f}%"
     else:
-        iv_str = "-" 
+        iv_str = "-"
+    sector = str(row.get('sector', '-'))
+    industry = str(row.get('industry', '-'))
     
     dist_color = "positive" if dist_high <= 20 else "negative"
     perf_color = "positive" if perf_6m > 0 else "negative"
@@ -218,6 +220,7 @@ def make_row(row, price_data):
         <div class="stock-header">
             <div class="stock-name">{name}</div>
             <div class="stock-ticker">{ticker} {badges_str}</div>
+            <div class="stock-sector">{sector} - {industry}</div>
         </div>
         <div class="stock-price">${close:.2f}</div>
         <div class="metric">Dist<br><span class="{dist_color}">{dist_high:.1f}%</span></div>
@@ -252,9 +255,10 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 .content{{padding:15px}}
 .stock-row{{display:none;flex-wrap:wrap;background:#1e222d;border-radius:12px;padding:12px;margin-bottom:8px}}
 .stock-row.visible{{display:flex}}
-.stock-header{{flex:1;min-width:150px}}
+.stock-header{{flex:2;min-width:200px}}
 .stock-name{{font-weight:600;font-size:14px;color:#fff}}
-.stock-ticker{{color:#787b86;font-size:11px;margin-top:2px}}
+.stock-ticker{{color:#787b86;font-size:11px}}
+.stock-sector{{color:#555b6e;font-size:10px;margin-top:2px}}
 .stock-price{{font-size:16px;font-weight:700;color:#fff;margin-left:10px}}
 .metric{{text-align:center;font-size:11px;color:#787b86;min-width:50px}}
 .metric span{{font-size:13px;font-weight:600}}
