@@ -271,6 +271,12 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 .stock-price{{font-size:16px;font-weight:700;color:#fff;margin-left:10px}}
 .metric{{text-align:center;font-size:11px;color:#787b86;min-width:50px}}
 .metric span{{font-size:13px;font-weight:600}}
+.iv-value{{font-size:16px;font-weight:700;padding:2px 6px;border-radius:4px;display:inline-block}}
+.iv-high{{background:#ef5350;color:#fff}}
+.iv-med{{background:#f7a928;color:#000}}
+.iv-low{{background:#26a69a;color:#fff}}
+.iv-none{{color:#787b86}}
+.metric.iv-metric{{min-width:70px}}
 .chart-cell{{flex:1;min-width:150px;height:60px;border-radius:6px;overflow:hidden}}
 .positive{{color:#26a69a}}
 .negative{{color:#ef5350}}
