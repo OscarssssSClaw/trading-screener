@@ -13,26 +13,32 @@ def get_iv_for_ticker(ticker):
     if ':' not in ticker:
         return None
     symbol = ticker.split(':')[1]
-    if symbol.startswith('OTC:'):
+    if symbol.startswith('OTC'):
         return None
-    try:
-        t = yf.Ticker(symbol)
-        stock_price = t.info.get('regularMarketPrice', 0)
-        if stock_price <= 0:
+    # Retry logic for rate limiting
+    for attempt in range(3):
+        try:
+            t = yf.Ticker(symbol)
+            stock_price = t.info.get('regularMarketPrice', 0)
+            if stock_price <= 0:
+                return None
+            opt = t.option_chain()
+            if opt.calls is None or len(opt.calls) == 0:
+                return None
+            active = opt.calls[opt.calls['bid'] > 0]
+            if len(active) == 0:
+                return None
+            active = active.copy()
+            active['dist'] = abs(active['strike'] - stock_price)
+            atm_idx = active['dist'].idxmin()
+            iv = active.loc[atm_idx].get('impliedVolatility', 0)
+            return iv * 100 if iv > 0 else None
+        except Exception as e:
+            if attempt < 2:
+                time.sleep(1)  # Wait before retry
+                continue
             return None
-        opt = t.option_chain()
-        if opt.calls is None or len(opt.calls) == 0:
-            return None
-        active = opt.calls[opt.calls['bid'] > 0]
-        if len(active) == 0:
-            return None
-        active = active.copy()
-        active['dist'] = abs(active['strike'] - stock_price)
-        atm_idx = active['dist'].idxmin()
-        iv = active.loc[atm_idx].get('impliedVolatility', 0)
-        return iv * 100 if iv > 0 else None
-    except:
-        return None
+    return None
 
 def get_price_history(ticker, days=90):
     if ':' not in ticker:
@@ -173,10 +179,11 @@ iv_data = {}
 for i, ticker in enumerate(all_stocks['ticker'].tolist()):
     iv = get_iv_for_ticker(ticker)
     if iv is not None:
-        iv_data[ticker] = iv
-    if (i + 1) % 20 == 0:
-        print(f"  {i+1}/{len(all_stocks)}...")
-    time.sleep(0.1)  # Rate limiting
+        if iv is not None and iv > 0:
+            iv_data[ticker] = iv
+    if (i + 1) % 10 == 0:
+        print(f"  IV: {i+1}/{len(all_stocks)} stocks...")
+    time.sleep(0.3)  # Rate limiting - increased delay
 print(f"Got IV for {len(iv_data)} stocks")
 
 def make_row(row, price_data):
