@@ -1,3 +1,0 @@
-tradingview-screener>=0.2.0
-yfinance>=0.2.0
-beautifulsoup4>=4.12.0

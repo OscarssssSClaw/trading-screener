@@ -395,6 +395,30 @@ document.querySelectorAll('.filter-btn').forEach(function(btn) {{
 }});
 
 showRowsForFilter('all');
+
+// Copy ticker on click
+document.querySelectorAll('.stock-row').forEach(function(row) {{
+    row.addEventListener('click', function(e) {{
+        // Don't copy if clicking on chart
+        if (e.target.closest('.chart-cell')) return;
+        
+        var ticker = row.querySelector('.stock-ticker');
+        if (ticker) {{
+            var text = ticker.textContent.trim().split(' ')[0];  // Get first word (ticker)
+            navigator.clipboard.writeText(text).then(function() {{
+                // Brief visual feedback
+                var badge = row.querySelector('.strategy-badge');
+                if (badge) {{
+                    var original = badge.textContent;
+                    badge.textContent = 'Copied!';
+                    setTimeout(function() {{
+                        badge.textContent = original;
+                    }}, 1000);
+                }}
+            }});
+        }}
+    }});
+}});
 </script>
 </body>
 </html>'''
