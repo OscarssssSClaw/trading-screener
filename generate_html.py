@@ -262,6 +262,18 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 .header{{background:#1e222d;padding:12px 15px;position:sticky;top:0;z-index:101;display:flex;justify-content:space-between;align-items:center}}
 .header h1{{font-size:18px;color:#2962ff}}
 .header p{{font-size:11px;color:#787b86}}
+.header{{justify-content:space-between}}
+.info-btn{{background:#262d3f;color:#d1d4dc;border:1px solid #2a2e39;padding:8px 14px;cursor:pointer;border-radius:6px;font-size:13px}}
+.info-btn:hover{{background:#363d52}}
+.modal{{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:1000;justify-content:center;align-items:center}}
+.modal.show{{display:flex}}
+.modal-content{{background:#1e222d;border-radius:12px;padding:24px;max-width:500px;width:90%;max-height:80vh;overflow-y:auto}}
+.modal-title{{font-size:18px;font-weight:600;color:#fff;margin-bottom:16px}}
+.modal-section{{margin-bottom:16px}}
+.modal-section h3{{font-size:14px;color:#2962ff;margin-bottom:8px}}
+.modal-section p{{font-size:12px;color:#d1d4dc;line-height:1.5}}
+.modal-close{{background:#2962ff;color:#fff;border:none;padding:10px 20px;border-radius:6px;cursor:pointer;margin-top:16px;width:100%}}
+.modal-close:hover{{background:#1e53e5}}
 .filter-section{{background:#1e222d;padding:10px 15px;position:sticky;top:0;z-index:100;border-bottom:1px solid #2a2e39}}
 .filter-label{{color:#787b86;font-size:12px;margin-right:10px}}
 .filter-btn{{background:#262d3f;color:#d1d4dc;border:1px solid #2a2e39;padding:8px 16px;margin-right:8px;cursor:pointer;border-radius:6px;font-size:13px}}
@@ -297,6 +309,7 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 <div class="header">
     <h1>Trading Screener</h1>
     <p>SPY 6M: {spy_perf:.1f}% | {len(all_stocks)} stocks</p>
+    <button class="info-btn" onclick="showInfo()">ℹ️ Info</button>
 </div>
 <div class="filter-section">
     <span class="filter-label">Filter:</span>
@@ -314,6 +327,28 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
     <div style="width:60px">RS</div>
     <div style="width:60px">ADR</div>
     <div style="flex:1;min-width:150px">Chart</div>
+</div>
+<div class="modal" id="infoModal">
+    <div class="modal-content">
+        <div class="modal-title">📊 Strategy Criteria</div>
+        <div class="modal-section">
+            <h3>VCP (Volatility Contraction Pattern)</h3>
+            <p>• Volume &gt; 1M<br>• 6M Return ≥ 50%<br>• Close &gt; SMA50<br>• Distance from High ≤ 25%</p>
+        </div>
+        <div class="modal-section">
+            <h3>Qullamaggie Breakout</h3>
+            <p>• Volume &gt; 1M<br>• 6M Return ≥ 50%<br>• Close &gt; SMA20<br>• Distance from High ≤ 15%</p>
+        </div>
+        <div class="modal-section">
+            <h3>HTF (High Tight Flag)</h3>
+            <p>• Volume &gt; 1M<br>• 6M Return 50-150%<br>• ADR 3-15%<br>• Close &gt; SMA50<br>• Distance from High ≤ 20%</p>
+        </div>
+        <div class="modal-section">
+            <h3>RS (Relative Strength)</h3>
+            <p>Stock's 6M return minus SPY's 6M return.<br>Positive = outperforming market.</p>
+        </div>
+        <button class="modal-close" onclick="closeInfo()">Close</button>
+    </div>
 </div>
 <div class="content">
 {all_rows}
@@ -418,6 +453,16 @@ document.querySelectorAll('.stock-row').forEach(function(row) {{
             }});
         }}
     }});
+}});
+
+function showInfo() {{
+    document.getElementById('infoModal').classList.add('show');
+}}
+function closeInfo() {{
+    document.getElementById('infoModal').classList.remove('show');
+}}
+document.getElementById('infoModal').addEventListener('click', function(e) {{
+    if (e.target === this) closeInfo();
 }});
 </script>
 </body>
