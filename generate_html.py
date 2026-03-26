@@ -326,7 +326,7 @@ body::before{{
 
 .header{{
     background:linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-primary) 100%);
-    padding:20px 24px;
+    padding:12px 24px;
     position:sticky;
     top:0;
     z-index:101;
@@ -334,23 +334,23 @@ body::before{{
     justify-content:space-between;
     align-items:center;
     border-bottom:1px solid var(--border);
-    box-shadow:0 4px 24px rgba(0,0,0,0.4);
+    box-shadow:0 2px 12px rgba(0,0,0,0.3);
 }}
 
 .header::before{{
     content:'';
     position:absolute;
     left:0;top:0;bottom:0;
-    width:4px;
+    width:3px;
     background:var(--accent);
-    box-shadow:0 0 20px var(--accent);
+    box-shadow:0 0 12px var(--accent);
 }}
 
 .header h1{{
-    font-size:22px;
+    font-size:16px;
     font-weight:700;
     color:var(--text-primary);
-    letter-spacing:-0.5px;
+    letter-spacing:-0.3px;
 }}
 
 .header h1 span{{
@@ -359,13 +359,13 @@ body::before{{
 
 .header-meta{{
     display:flex;
-    flex-direction:column;
-    align-items:flex-end;
-    gap:4px;
+    flex-direction:row;
+    align-items:center;
+    gap:16px;
 }}
 
 .header-meta p{{
-    font-size:11px;
+    font-size:10px;
     color:var(--text-secondary);
 }}
 
@@ -377,10 +377,10 @@ body::before{{
     background:transparent;
     color:var(--accent);
     border:1px solid var(--accent);
-    padding:10px 18px;
+    padding:6px 12px;
     cursor:pointer;
-    border-radius:6px;
-    font-size:13px;
+    border-radius:4px;
+    font-size:11px;
     font-weight:600;
     font-family:inherit;
     transition:all 0.2s;
@@ -672,7 +672,7 @@ body::before{{
     .header{{flex-direction:column;gap:12px;text-align:center}}
     .header::before{{width:100%;height:3px;top:0}}
     .header-meta{{align-items:center}}
-    .filter-section{{top:0}}
+    .filter-section{{top:48px}}
     .stock-row{{flex-wrap:wrap;padding:16px}}
     .stock-info{{flex:1 1 100%;margin-bottom:8px}}
     .chart-cell{{flex:1 1 100%;margin-top:8px}}
