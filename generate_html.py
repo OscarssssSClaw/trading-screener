@@ -43,17 +43,32 @@ def get_iv_for_ticker(ticker):
             return None
     return None
 
-def get_price_history(ticker, days=90):
+def get_price_and_adr(ticker, days=90):
     if ':' not in ticker:
-        return None
+        return None, None
     symbol = ticker.split(':')[1]
-    if ticker.startswith('OTC:'):
-        return None
+    if ticker.startswith('OTC'):
+        return None, None
     try:
         t = yf.Ticker(symbol)
         hist = t.history(period=f"{days}d")
         if hist.empty or len(hist) < 30:
-            return None
+            return None, None
+        
+        # Calculate ADR (20-day Average Daily Range)
+        adr = 0
+        if len(hist) >= 20:
+            ranges = []
+            for i in range(-20, 0):
+                high = hist.iloc[i]['High']
+                low = hist.iloc[i]['Low']
+                close = hist.iloc[i]['Close']
+                if close > 0:
+                    daily_range = ((high - low) / close) * 100
+                    ranges.append(daily_range)
+            if ranges:
+                adr = sum(ranges) / len(ranges)
+        
         data = []
         for idx, row in hist.iterrows():
             data.append({
@@ -64,9 +79,9 @@ def get_price_history(ticker, days=90):
                 'close': float(row['Close']),
                 'volume': int(row['Volume']) if 'Volume' in row else 0
             })
-        return data
+        return data, adr
     except:
-        return None
+        return None, None
 
 print("Fetching VCP stocks...")
 try:
@@ -169,13 +184,16 @@ print(f"Actual - VCP: {vcp_count}, QL: {ql_count}, HTF: {htf_count}")
 # Get price data for charts
 print("Fetching price history...")
 price_data = {}
+adr_data = {}
 for i, ticker in enumerate(all_stocks['ticker'].tolist()):
-    prices = get_price_history(ticker, 90)
+    prices, adr = get_price_and_adr(ticker, 90)
     if prices:
         price_data[ticker] = prices
+    if adr and adr > 0:
+        adr_data[ticker] = adr
     if (i + 1) % 20 == 0:
         print(f"  {i+1}/{len(all_stocks)}...")
-print(f"Got price data for {len(price_data)} stocks")
+print(f"Got price data for {len(price_data)} stocks, ADR for {len(adr_data)} stocks")
 
 print("Fetching IV data...")
 iv_data = {}
@@ -195,7 +213,8 @@ def make_row(row, price_data, anim_delay=0):
     close = float(row['close'])
     dist_high = float(row['dist_high'])
     perf_6m = float(row['Perf.6M'])
-    adr = float(row['ADR'])
+    # Use our calculated ADR from yfinance, fallback to TradingView if not available
+    adr = adr_data.get(ticker, float(row.get('ADR', 0) or 0))
     rs = float(row.get('RS', 0))
     chart_id = "chart_" + ticker.replace(':', '_')
     price_json = json.dumps(price_data.get(ticker, []))
