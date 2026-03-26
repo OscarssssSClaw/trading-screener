@@ -2,12 +2,15 @@
 """TradingView Screener HTML Generator - Multi-strategy badges on merged stocks"""
 
 import time
+import datetime
 import yfinance as yf
 from tradingview_screener import Query, Column
 import pandas as pd
 import json
 
 start = time.time()
+now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))
+last_updated = now.strftime("%Y-%m-%d %H:%M") + " HK"
 
 def get_iv_for_ticker(ticker):
     if ':' not in ticker:
@@ -315,7 +318,7 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 <body>
 <div class="header">
     <h1>Trading Screener</h1>
-    <p>SPY 6M: {spy_perf:.1f}% | {len(all_stocks)} stocks</p>
+    <p>SPY 6M: {spy_perf:.1f}% | {len(all_stocks)} stocks | Updated: {last_updated}</p>
     <button class="info-btn" onclick="showInfo()">ℹ️ Info</button>
 </div>
 <div class="filter-section">
