@@ -189,7 +189,7 @@ for i, ticker in enumerate(all_stocks['ticker'].tolist()):
     time.sleep(0.3)  # Rate limiting - increased delay
 print(f"Got IV for {len(iv_data)} stocks")
 
-def make_row(row, price_data):
+def make_row(row, price_data, anim_delay=0):
     ticker = str(row['ticker'])
     name = str(row['name']).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
     close = float(row['close'])
@@ -257,7 +257,7 @@ def make_row(row, price_data):
         <script type="application/json" class="chart-data">{price_json}</script>
     </div>'''
 
-all_rows = ''.join([make_row(row, price_data) for _, row in all_stocks.iterrows()])
+all_rows = ''.join([make_row(row, price_data, i*0.05) for i, (_, row) in enumerate(all_stocks.iterrows())])
 
 html = f'''<!DOCTYPE html>
 <html>
@@ -267,58 +267,405 @@ html = f'''<!DOCTYPE html>
 <title>Trading Screener</title>
 <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
 <style>
+@import url('https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700&display=swap');
+
 *{{box-sizing:border-box;margin:0;padding:0}}
-body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#131722;color:#d1d4dc;min-height:100vh}}
-.header{{background:#1e222d;padding:12px 15px;position:sticky;top:0;z-index:101;display:flex;justify-content:space-between;align-items:center}}
-.header h1{{font-size:18px;color:#2962ff}}
-.header p{{font-size:11px;color:#787b86}}
-.header{{justify-content:space-between}}
-.info-btn{{background:#262d3f;color:#d1d4dc;border:1px solid #2a2e39;padding:8px 14px;cursor:pointer;border-radius:6px;font-size:13px}}
-.info-btn:hover{{background:#363d52}}
-.modal{{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:1000;justify-content:center;align-items:center}}
+
+:root{{
+    --bg-primary: #0a0b0f;
+    --bg-secondary: #12141a;
+    --bg-card: #1a1d26;
+    --accent: #00ff88;
+    --accent-dim: #00ff8833;
+    --text-primary: #f0f2f5;
+    --text-secondary: #8b919e;
+    --text-muted: #555a66;
+    --border: #2a2e3a;
+    --red: #ff4757;
+    --orange: #ff9f43;
+    --blue: #3b82f6;
+}}
+
+body{{
+    font-family:'Satoshi',-apple-system,BlinkMacSystemFont,sans-serif;
+    background:var(--bg-primary);
+    color:var(--text-primary);
+    min-height:100vh;
+    line-height:1.4;
+}}
+
+/* Grain overlay */
+body::before{{
+    content:'';
+    position:fixed;
+    top:0;left:0;width:100%;height:100%;
+    background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+    opacity:0.03;
+    pointer-events:none;
+    z-index:9999;
+}}
+
+.header{{
+    background:linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-primary) 100%);
+    padding:20px 24px;
+    position:sticky;
+    top:0;
+    z-index:101;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    border-bottom:1px solid var(--border);
+    box-shadow:0 4px 24px rgba(0,0,0,0.4);
+}}
+
+.header::before{{
+    content:'';
+    position:absolute;
+    left:0;top:0;bottom:0;
+    width:4px;
+    background:var(--accent);
+    box-shadow:0 0 20px var(--accent);
+}}
+
+.header h1{{
+    font-size:22px;
+    font-weight:700;
+    color:var(--text-primary);
+    letter-spacing:-0.5px;
+}}
+
+.header h1 span{{
+    color:var(--accent);
+}}
+
+.header-meta{{
+    display:flex;
+    flex-direction:column;
+    align-items:flex-end;
+    gap:4px;
+}}
+
+.header-meta p{{
+    font-size:11px;
+    color:var(--text-secondary);
+}}
+
+.header-meta p span{{
+    color:var(--accent);
+}}
+
+.info-btn{{
+    background:transparent;
+    color:var(--accent);
+    border:1px solid var(--accent);
+    padding:10px 18px;
+    cursor:pointer;
+    border-radius:6px;
+    font-size:13px;
+    font-weight:600;
+    font-family:inherit;
+    transition:all 0.2s;
+}}
+
+.info-btn:hover{{
+    background:var(--accent);
+    color:var(--bg-primary);
+    box-shadow:0 0 20px var(--accent-dim);
+}}
+
+.filter-section{{
+    background:var(--bg-secondary);
+    padding:16px 24px;
+    position:sticky;
+    top:0;
+    z-index:100;
+    border-bottom:1px solid var(--border);
+    display:flex;
+    gap:12px;
+    flex-wrap:wrap;
+    align-items:center;
+}}
+
+.filter-label{{
+    color:var(--text-muted);
+    font-size:11px;
+    font-weight:600;
+    text-transform:uppercase;
+    letter-spacing:1px;
+}}
+
+.filter-btn{{
+    background:var(--bg-card);
+    color:var(--text-secondary);
+    border:1px solid var(--border);
+    padding:10px 20px;
+    cursor:pointer;
+    border-radius:6px;
+    font-size:13px;
+    font-weight:500;
+    font-family:inherit;
+    transition:all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}}
+
+.filter-btn:hover{{
+    border-color:var(--accent);
+    color:var(--text-primary);
+    transform:translateY(-2px);
+}}
+
+.filter-btn.active{{
+    background:var(--accent);
+    color:var(--bg-primary);
+    border-color:var(--accent);
+    font-weight:700;
+    box-shadow:0 0 16px var(--accent-dim);
+}}
+
+.content{{padding:20px 24px}}
+
+.col-header{{
+    display:none;
+}}
+
+.stock-row{{
+    display:none;
+    background:var(--bg-card);
+    border:1px solid var(--border);
+    border-radius:12px;
+    padding:16px 20px;
+    margin-bottom:12px;
+    gap:16px;
+    align-items:center;
+    transition:all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position:relative;
+    overflow:hidden;
+}}
+
+.stock-row.visible{{
+    display:flex;
+    animation:slideIn 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}}
+
+.stock-row::before{{
+    content:'';
+    position:absolute;
+    left:0;top:0;bottom:0;
+    width:3px;
+    background:var(--border);
+    transition:background 0.2s;
+}}
+
+.stock-row:hover{{
+    border-color:var(--accent);
+    transform:translateX(4px);
+    box-shadow:0 4px 24px rgba(0,0,0,0.3);
+}}
+
+.stock-row:hover::before{{
+    background:var(--accent);
+}}
+
+@keyframes slideIn{{
+    from{{
+        opacity:0;
+        transform:translateX(-20px);
+    }}
+    to{{
+        opacity:1;
+        transform:translateX(0);
+    }}
+}}
+
+.stock-info{{
+    flex:1.5;
+    min-width:180px;
+}}
+
+.stock-name{{
+    font-weight:700;
+    font-size:15px;
+    color:var(--text-primary);
+    margin-bottom:4px;
+}}
+
+.stock-ticker{{
+    color:var(--text-secondary);
+    font-size:11px;
+    display:flex;
+    align-items:center;
+    gap:6px;
+    flex-wrap:wrap;
+}}
+
+.stock-sector{{
+    color:var(--text-muted);
+    font-size:10px;
+    margin-top:4px;
+}}
+
+.stock-price{{
+    font-size:20px;
+    font-weight:700;
+    color:var(--text-primary);
+    min-width:80px;
+    text-align:right;
+}}
+
+.metric{{
+    text-align:center;
+    min-width:60px;
+}}
+
+.metric-label{{
+    font-size:9px;
+    color:var(--text-muted);
+    text-transform:uppercase;
+    letter-spacing:0.5px;
+    margin-bottom:2px;
+}}
+
+.metric-value{{
+    font-size:14px;
+    font-weight:600;
+    color:var(--text-primary);
+}}
+
+.iv-value{{
+    font-size:15px;
+    font-weight:700;
+    padding:4px 10px;
+    border-radius:4px;
+    display:inline-block;
+}}
+
+.iv-high{{background:var(--red);color:#fff}}
+.iv-med{{background:var(--orange);color:#000}}
+.iv-low{{background:var(--accent);color:#000}}
+.iv-none{{color:var(--text-muted)}}
+
+.positive{{color:var(--accent)}}
+.negative{{color:var(--red)}}
+
+.strategy-badge{{
+    padding:3px 8px;
+    border-radius:4px;
+    font-size:9px;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:0.5px;
+}}
+
+.strategy-badge.strategy-vcp{{background:var(--blue)}}
+.strategy-badge.strategy-qullamaggie{{background:var(--red)}}
+.strategy-badge.strategy-htf{{background:var(--accent);color:#000}}
+
+.chart-cell{{
+    flex:1;
+    min-width:140px;
+    height:60px;
+    border-radius:6px;
+    overflow:hidden;
+    border:1px solid var(--border);
+}}
+
+/* Modal */
+.modal{{
+    display:none;
+    position:fixed;
+    top:0;left:0;width:100%;height:100%;
+    background:rgba(0,0,0,0.85);
+    z-index:1000;
+    justify-content:center;
+    align-items:center;
+    backdrop-filter:blur(8px);
+}}
+
 .modal.show{{display:flex}}
-.modal-content{{background:#1e222d;border-radius:12px;padding:24px;max-width:500px;width:90%;max-height:80vh;overflow-y:auto}}
-.modal-title{{font-size:18px;font-weight:600;color:#fff;margin-bottom:16px}}
-.modal-section{{margin-bottom:16px}}
-.modal-section h3{{font-size:14px;color:#2962ff;margin-bottom:8px}}
-.modal-section p{{font-size:12px;color:#d1d4dc;line-height:1.5}}
-.modal-close{{background:#2962ff;color:#fff;border:none;padding:10px 20px;border-radius:6px;cursor:pointer;margin-top:16px;width:100%}}
-.modal-close:hover{{background:#1e53e5}}
-.filter-section{{background:#1e222d;padding:10px 15px;position:sticky;top:0;z-index:100;border-bottom:1px solid #2a2e39}}
-.filter-label{{color:#787b86;font-size:12px;margin-right:10px}}
-.filter-btn{{background:#262d3f;color:#d1d4dc;border:1px solid #2a2e39;padding:8px 16px;margin-right:8px;cursor:pointer;border-radius:6px;font-size:13px}}
-.filter-btn:hover{{background:#363d52}}
-.filter-btn.active{{background:#2962ff;color:#fff;border-color:#2962ff}}
-.content{{padding:15px}}
-.stock-row{{display:none;flex-wrap:wrap;background:#1e222d;border-radius:12px;padding:12px;margin-bottom:8px}}
-.stock-row.visible{{display:flex}}
-.stock-header{{flex:2;min-width:200px}}
-.stock-name{{font-weight:600;font-size:14px;color:#fff}}
-.stock-ticker{{color:#787b86;font-size:11px}}
-.stock-sector{{color:#555b6e;font-size:10px;margin-top:2px}}
-.stock-price{{font-size:16px;font-weight:700;color:#fff;margin-left:10px}}
-.metric{{text-align:center;font-size:11px;color:#787b86;min-width:50px}}
-.metric span{{font-size:13px;font-weight:600}}
-.iv-value{{font-size:16px;font-weight:700;padding:2px 6px;border-radius:4px;display:inline-block}}
-.iv-high{{background:#ef5350;color:#fff}}
-.iv-med{{background:#f7a928;color:#000}}
-.iv-low{{background:#26a69a;color:#fff}}
-.iv-none{{color:#787b86}}
-.metric.iv-metric{{min-width:70px}}
-.chart-cell{{flex:1;min-width:150px;height:60px;border-radius:6px;overflow:hidden}}
-.positive{{color:#26a69a}}
-.negative{{color:#ef5350}}
-.strategy-badge{{color:#fff;padding:2px 6px;border-radius:4px;font-size:10px;margin-left:4px}}
-.strategy-badge.strategy-vcp{{background:#2962ff}}
-.strategy-badge.strategy-qullamaggie{{background:#ef5350}}
-.strategy-badge.strategy-htf{{background:#26a69a}}
-.col-header{{display:flex;flex-wrap:wrap;gap:10px;padding:8px 12px;color:#787b86;font-size:11px;font-weight:600;border-bottom:1px solid #2a2e39;position:sticky;top:50px;background:#131722;z-index:98}}
+
+.modal-content{{
+    background:linear-gradient(145deg, var(--bg-secondary), var(--bg-card));
+    border:1px solid var(--border);
+    border-radius:16px;
+    padding:32px;
+    max-width:520px;
+    width:90%;
+    max-height:85vh;
+    overflow-y:auto;
+    box-shadow:0 24px 64px rgba(0,0,0,0.5);
+}}
+
+.modal-title{{
+    font-size:22px;
+    font-weight:700;
+    color:var(--text-primary);
+    margin-bottom:24px;
+    display:flex;
+    align-items:center;
+    gap:10px;
+}}
+
+.modal-title::before{{
+    content:'📊';
+}}
+
+.modal-section{{
+    margin-bottom:20px;
+}}
+
+.modal-section h3{{
+    font-size:14px;
+    font-weight:700;
+    color:var(--accent);
+    margin-bottom:8px;
+    text-transform:uppercase;
+    letter-spacing:1px;
+}}
+
+.modal-section p{{
+    font-size:13px;
+    color:var(--text-secondary);
+    line-height:1.6;
+}}
+
+.modal-close{{
+    background:var(--accent);
+    color:var(--bg-primary);
+    border:none;
+    padding:14px 24px;
+    border-radius:8px;
+    cursor:pointer;
+    font-size:14px;
+    font-weight:700;
+    font-family:inherit;
+    margin-top:24px;
+    width:100%;
+    transition:all 0.2s;
+}}
+
+.modal-close:hover{{
+    box-shadow:0 0 24px var(--accent-dim);
+    transform:translateY(-2px);
+}}
+
+/* Mobile responsive */
+@media (max-width:768px){{
+    .header{{flex-direction:column;gap:12px;text-align:center}}
+    .header::before{{width:100%;height:3px;top:0}}
+    .header-meta{{align-items:center}}
+    .filter-section{{top:0}}
+    .stock-row{{flex-wrap:wrap;padding:16px}}
+    .stock-info{{flex:1 1 100%;margin-bottom:8px}}
+    .chart-cell{{flex:1 1 100%;margin-top:8px}}
+}}
 </style>
 </head>
 <body>
 <div class="header">
-    <h1>Trading Screener</h1>
-    <p>SPY 6M: {spy_perf:.1f}% | {len(all_stocks)} stocks | Updated: {last_updated}</p>
+    <h1>Trading <span>Screener</span></h1>
+    <div class="header-meta">
+        <p>SPY 6M: <span>{spy_perf:.1f}%</span> | <span>{len(all_stocks)}</span> stocks</p>
+        <p>Updated: {last_updated}</p>
+    </div>
     <button class="info-btn" onclick="showInfo()">ℹ️ Info</button>
 </div>
 <div class="filter-section">
@@ -357,7 +704,7 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
             <h3>RS (Relative Strength)</h3>
             <p>Stock's 6M return minus SPY's 6M return.<br>Positive = outperforming market.</p>
         </div>
-        <button class="modal-close" onclick="closeInfo()">Close</button>
+        <button class="modal-close" onclick="closeInfo()">Got it ✓</button>
     </div>
 </div>
 <div class="content">
