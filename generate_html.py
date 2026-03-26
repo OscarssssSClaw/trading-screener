@@ -394,30 +394,31 @@ body::before{{
     letter-spacing:1px;
 }}
 
-.filter-btn{{
+.filter-select{{
     background:var(--bg-card);
-    color:var(--text-secondary);
+    color:var(--text-primary);
     border:1px solid var(--border);
-    padding:10px 20px;
+    padding:10px 36px 10px 14px;
     cursor:pointer;
     border-radius:6px;
     font-size:13px;
     font-weight:500;
     font-family:inherit;
     transition:all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    appearance:none;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238b919e' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat:no-repeat;
+    background-position:right 12px center;
+    min-width:160px;
 }}
 
-.filter-btn:hover{{
+.filter-select:hover{{
     border-color:var(--accent);
-    color:var(--text-primary);
-    transform:translateY(-2px);
 }}
 
-.filter-btn.active{{
-    background:var(--accent);
-    color:var(--bg-primary);
+.filter-select:focus{{
+    outline:none;
     border-color:var(--accent);
-    font-weight:700;
     box-shadow:0 0 16px var(--accent-dim);
 }}
 
@@ -669,11 +670,13 @@ body::before{{
     <button class="info-btn" onclick="showInfo()">ℹ️ Info</button>
 </div>
 <div class="filter-section">
-    <span class="filter-label">Filter:</span>
-    <button class="filter-btn active" data-filter="all">All ({len(all_stocks)})</button>
-    <button class="filter-btn" data-filter="VCP">VCP ({vcp_count})</button>
-    <button class="filter-btn" data-filter="Qullamaggie">Qullamaggie ({ql_count})</button>
-    <button class="filter-btn" data-filter="HTF">HTF ({htf_count})</button>
+    <span class="filter-label">Strategy:</span>
+    <select class="filter-select" id="strategyFilter" onchange="filterChanged()">
+        <option value="all">All ({len(all_stocks)})</option>
+        <option value="VCP">VCP ({vcp_count})</option>
+        <option value="Qullamaggie">Qullamaggie ({ql_count})</option>
+        <option value="HTF">HTF ({htf_count})</option>
+    </select>
 </div>
 <div class="col-header">
     <div style="flex:1;min-width:150px">Stock</div>
@@ -778,13 +781,10 @@ function showRowsForFilter(filter) {{
     }});
 }}
 
-document.querySelectorAll('.filter-btn').forEach(function(btn) {{
-    btn.addEventListener('click', function() {{
-        document.querySelectorAll('.filter-btn').forEach(function(b) {{ b.classList.remove('active'); }});
-        btn.classList.add('active');
-        showRowsForFilter(btn.getAttribute('data-filter'));
-    }});
-}});
+function filterChanged() {{
+    var filter = document.getElementById('strategyFilter').value;
+    showRowsForFilter(filter);
+}}
 
 showRowsForFilter('all');
 
