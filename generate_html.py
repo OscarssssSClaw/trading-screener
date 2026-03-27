@@ -260,7 +260,7 @@ def make_row(row, price_data, anim_delay=0):
     data_strategies = ','.join(strat_list)
     
     return f'''
-    <div class="stock-row {classes_str}" data-strategies="{data_strategies}">
+    <div class="stock-row {classes_str}" data-strategies="{data_strategies}" data-rs="{rs:.1f}" data-iv="{iv_val}" data-price="{close}" data-dist="{dist_high:.1f}">
         <div class="stock-header">
             <div class="stock-name">{name}</div>
             <div class="stock-ticker">{ticker} {badges_str}</div>
@@ -696,6 +696,15 @@ body::before{{
         <option value="Qullamaggie">Qullamaggie ({ql_count})</option>
         <option value="HTF">HTF ({htf_count})</option>
     </select>
+    <select class="filter-select" id="sortFilter" onchange="sortChanged()">
+        <option value="rs-desc">RS ↓ (High to Low)</option>
+        <option value="rs-asc">RS ↑ (Low to High)</option>
+        <option value="iv-desc">IV ↓ (High to Low)</option>
+        <option value="iv-asc">IV ↑ (Low to High)</option>
+        <option value="price-desc">Price ↓</option>
+        <option value="price-asc">Price ↑</option>
+        <option value="dist-asc">Dist ↑ (Near High)</option>
+    </select>
 </div>
 <div class="col-header">
     <div style="flex:1;min-width:150px">Stock</div>
@@ -801,8 +810,7 @@ function showRowsForFilter(filter) {{
 }}
 
 function filterChanged() {{
-    var filter = document.getElementById('strategyFilter').value;
-    showRowsForFilter(filter);
+    showAllRows();
 }}
 
 showRowsForFilter('all');
