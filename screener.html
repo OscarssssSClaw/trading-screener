@@ -739,11 +739,59 @@ function showRowsForFilter(filter) {
     });
 }
 
+var currentSort = 'rs-desc';
+
+function sortChanged() {
+    currentSort = document.getElementById('sortFilter').value;
+    showAllRows();
+}
+
+function showAllRows() {
+    var filter = document.getElementById('strategyFilter').value;
+    var rows = [];
+    document.querySelectorAll('.stock-row').forEach(function(row) {
+        var strategies = row.getAttribute('data-strategies') || '';
+        var stratList = strategies.split(',').map(function(s) { return s.trim(); });
+        if (filter === 'all' || stratList.indexOf(filter) !== -1) {
+            rows.push(row);
+            row.classList.add('visible');
+        } else {
+            row.classList.remove('visible');
+        }
+    });
+    
+    // Sort rows
+    rows.sort(function(a, b) {
+        if (currentSort === 'rs-desc') {
+            return parseFloat(b.getAttribute('data-rs') || 0) - parseFloat(a.getAttribute('data-rs') || 0);
+        } else if (currentSort === 'rs-asc') {
+            return parseFloat(a.getAttribute('data-rs') || 0) - parseFloat(b.getAttribute('data-rs') || 0);
+        } else if (currentSort === 'iv-desc') {
+            return parseFloat(b.getAttribute('data-iv') || 0) - parseFloat(a.getAttribute('data-iv') || 0);
+        } else if (currentSort === 'iv-asc') {
+            return parseFloat(a.getAttribute('data-iv') || 0) - parseFloat(b.getAttribute('data-iv') || 0);
+        } else if (currentSort === 'price-desc') {
+            return parseFloat(b.getAttribute('data-price') || 0) - parseFloat(a.getAttribute('data-price') || 0);
+        } else if (currentSort === 'price-asc') {
+            return parseFloat(a.getAttribute('data-price') || 0) - parseFloat(b.getAttribute('data-price') || 0);
+        } else if (currentSort === 'dist-asc') {
+            return parseFloat(a.getAttribute('data-dist') || 0) - parseFloat(b.getAttribute('data-dist') || 0);
+        }
+        return 0;
+    });
+    
+    // Reorder in DOM
+    var parent = rows[0] ? rows[0].parentNode : null;
+    if (parent) {
+        rows.forEach(function(row) { parent.appendChild(row); });
+    }
+}
+
 function filterChanged() {
     showAllRows();
 }
 
-showRowsForFilter('all');
+showAllRows();
 
 // Copy ticker on click
 document.querySelectorAll('.stock-row').forEach(function(row) {
