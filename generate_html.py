@@ -19,7 +19,7 @@ def get_iv_for_ticker(ticker):
     if symbol.startswith('OTC'):
         return None
     # Retry logic for rate limiting
-    for attempt in range(3):
+    for attempt in range(5):
         try:
             t = yf.Ticker(symbol)
             stock_price = t.info.get('regularMarketPrice', 0)
@@ -28,7 +28,7 @@ def get_iv_for_ticker(ticker):
             opt = t.option_chain()
             if opt.calls is None or len(opt.calls) == 0:
                 return None
-            active = opt.calls[opt.calls['bid'] > 0]
+            active = opt.calls
             if len(active) == 0:
                 return None
             active = active.copy()
@@ -38,7 +38,7 @@ def get_iv_for_ticker(ticker):
             return iv * 100 if iv > 0 else None
         except Exception as e:
             if attempt < 2:
-                time.sleep(1)  # Wait before retry
+                time.sleep(2)  # Wait before retry
                 continue
             return None
     return None
@@ -204,7 +204,7 @@ for i, ticker in enumerate(all_stocks['ticker'].tolist()):
             iv_data[ticker] = iv
     if (i + 1) % 10 == 0:
         print(f"  IV: {i+1}/{len(all_stocks)} stocks...")
-    time.sleep(0.3)  # Rate limiting - increased delay
+    time.sleep(0.5)  # Rate limiting - increased delay
 print(f"Got IV for {len(iv_data)} stocks")
 
 def make_row(row, price_data, anim_delay=0):
