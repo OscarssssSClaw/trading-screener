@@ -2,8 +2,8 @@ name: Deploy Trading Screener
 
 on:
   schedule:
-    # Weekdays at 6:00 AM Hong Kong time (10:00 PM UTC previous day)
-    - cron: '0 22 * * 2-6'
+    # Weekdays at 7:00 AM Hong Kong time (23:00 UTC) - US after-hours, best for IV
+    - cron: '0 23 * * 2-6'
   workflow_dispatch:  # Allow manual trigger
 
 permissions:
