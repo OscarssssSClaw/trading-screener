@@ -7,7 +7,7 @@ on:
   workflow_dispatch:  # Allow manual trigger
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -36,6 +36,14 @@ jobs:
       - name: Generate screener HTML
         run: |
           python generate_html.py
+
+      - name: Commit generated history
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add screener.html data/gamma_contract_history.json
+          git diff --cached --quiet || git commit -m "chore: update screener data"
+          git push || true
           
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v4

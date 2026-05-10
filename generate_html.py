@@ -8,6 +8,7 @@ from tradingview_screener import Query, Column
 import pandas as pd
 import json
 import html
+from pathlib import Path
 
 start = time.time()
 now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))
@@ -19,6 +20,100 @@ GAMMA_MIN_VOL_OI = 5
 GAMMA_MIN_PREMIUM = 250_000
 GAMMA_MAX_DTE = 30
 GAMMA_MAX_EXPIRIES = 4
+GAMMA_HISTORY_PATH = Path("data/gamma_contract_history.json")
+
+
+
+def contract_key(symbol, contract):
+    return f"{symbol}|{contract}"
+
+
+def load_gamma_history():
+    if not GAMMA_HISTORY_PATH.exists():
+        return {'contracts': {}}
+    try:
+        data = json.loads(GAMMA_HISTORY_PATH.read_text())
+        if isinstance(data, dict) and isinstance(data.get('contracts'), dict):
+            return data
+    except Exception:
+        pass
+    return {'contracts': {}}
+
+
+def verify_contract(symbol, candidate, history):
+    prev = history.get('contracts', {}).get(contract_key(symbol, candidate.get('contract', '')))
+    if not prev:
+        candidate.update({
+            'verification': 'Pending',
+            'verification_note': 'First seen; need next OI update',
+            'prev_oi': None,
+            'oi_change': None,
+            'oi_change_pct': None,
+        })
+        return candidate
+
+    prev_seen = prev.get('seen_date', 'previous run')
+    if prev_seen == now.strftime('%Y-%m-%d'):
+        candidate.update({
+            'verification': 'Pending',
+            'verification_note': 'Seen earlier today; need next OI update',
+            'prev_oi': int(prev.get('openInterest') or 0),
+            'oi_change': None,
+            'oi_change_pct': None,
+        })
+        return candidate
+
+    prev_oi = int(prev.get('openInterest') or 0)
+    current_oi = int(candidate.get('openInterest') or 0)
+    oi_change = current_oi - prev_oi
+    oi_change_pct = (oi_change / prev_oi * 100) if prev_oi > 0 else None
+
+    if oi_change >= max(100, prev_oi * 0.20):
+        status = 'Confirmed OI ↑'
+        note = f"OI increased vs {prev_seen}"
+    elif oi_change > 0:
+        status = 'Partial OI ↑'
+        note = f"OI rose modestly vs {prev_seen}"
+    elif oi_change == 0:
+        status = 'Unconfirmed'
+        note = f"OI unchanged vs {prev_seen}"
+    else:
+        status = 'Failed OI ↓'
+        note = f"OI fell vs {prev_seen}; could be closing/spread/expired interest"
+
+    candidate.update({
+        'verification': status,
+        'verification_note': note,
+        'prev_oi': prev_oi,
+        'oi_change': oi_change,
+        'oi_change_pct': round(oi_change_pct, 1) if oi_change_pct is not None else None,
+    })
+    return candidate
+
+
+def save_gamma_history(gamma_data):
+    GAMMA_HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    contracts = {}
+    for ticker, gamma in gamma_data.items():
+        symbol = ticker.split(':')[-1]
+        for c in gamma.get('contracts', []) or []:
+            key = contract_key(symbol, c.get('contract', ''))
+            contracts[key] = {
+                'ticker': ticker,
+                'symbol': symbol,
+                'contract': c.get('contract'),
+                'expiry': c.get('expiry'),
+                'strike': c.get('strike'),
+                'type': c.get('type', 'CALL'),
+                'openInterest': c.get('openInterest'),
+                'volume': c.get('volume'),
+                'premium': c.get('premium'),
+                'score': c.get('score'),
+                'seen_date': now.strftime('%Y-%m-%d'),
+                'updated_at': last_updated,
+            }
+    payload = {'updated_at': last_updated, 'contracts': contracts}
+    GAMMA_HISTORY_PATH.write_text(json.dumps(payload, indent=2, sort_keys=True) + '\n')
 
 def safe_float(value, default=0.0):
     try:
@@ -94,7 +189,7 @@ def gamma_score(dte, pct_otm, vol_oi, premium, stock_context):
     return min(score, 100), ', '.join(tags)
 
 
-def get_gamma_squeeze_for_ticker(ticker, stock_price, price_rows=None):
+def get_gamma_squeeze_for_ticker(ticker, stock_price, price_rows=None, history=None):
     """Find the best yfinance-visible gamma squeeze candidate for a stock.
 
     This is a radar only. yfinance does not reveal buy-at-ask, sweeps, BTO/STO,
@@ -104,6 +199,7 @@ def get_gamma_squeeze_for_ticker(ticker, stock_price, price_rows=None):
     if ':' not in ticker or not stock_price or stock_price <= 0:
         return empty
     symbol = ticker.split(':')[1]
+    history = history or {'contracts': {}}
     if symbol.startswith('OTC'):
         return empty
 
@@ -175,6 +271,7 @@ def get_gamma_squeeze_for_ticker(ticker, stock_price, price_rows=None):
                 'ask': round(safe_float(row.get('ask'), 0.0), 2),
                 'tags': tags,
             }
+            candidate = verify_contract(symbol, candidate, history)
             candidates.append(candidate)
 
     if not candidates:
@@ -393,18 +490,21 @@ for i, ticker in enumerate(all_stocks['ticker'].tolist()):
 print(f"Got IV for {len(iv_data)} stocks")
 
 print("Fetching gamma squeeze candidates...")
+gamma_history = load_gamma_history()
 gamma_data = {}
 for i, row in enumerate(all_stocks.itertuples()):
     ticker = getattr(row, 'ticker')
     close = safe_float(getattr(row, 'close', 0), 0.0)
-    gamma = get_gamma_squeeze_for_ticker(ticker, close, price_data.get(ticker, []))
+    gamma = get_gamma_squeeze_for_ticker(ticker, close, price_data.get(ticker, []), gamma_history)
     if gamma and gamma.get('score', 0) > 0:
         gamma_data[ticker] = gamma
     if (i + 1) % 10 == 0:
         print(f"  Gamma: {i+1}/{len(all_stocks)} stocks...")
     time.sleep(0.25)
 gamma_count = sum(1 for g in gamma_data.values() if g.get('score', 0) >= 60)
+save_gamma_history(gamma_data)
 print(f"Got gamma candidates for {len(gamma_data)} stocks ({gamma_count} score >= 60)")
+print(f"Saved gamma history: {GAMMA_HISTORY_PATH}")
 
 def make_row(row, price_data, anim_delay=0):
     ticker = str(row['ticker'])
@@ -875,6 +975,19 @@ body::before{{
     color:var(--accent);
     font-weight:800;
 }}
+.gamma-card-verify{{
+    align-self:flex-start;
+    font-size:10px;
+    font-weight:900;
+    padding:4px 8px;
+    border-radius:999px;
+    background:rgba(255,255,255,0.08);
+    color:#eef1f7;
+}}
+.verify-confirmed{{background:rgba(0,255,136,0.18);color:var(--accent);border:1px solid rgba(0,255,136,0.35)}}
+.verify-partial{{background:rgba(255,159,67,0.18);color:var(--orange);border:1px solid rgba(255,159,67,0.35)}}
+.verify-pending{{background:rgba(59,130,246,0.18);color:#93c5fd;border:1px solid rgba(59,130,246,0.35)}}
+.verify-unconfirmed,.verify-failed{{background:rgba(255,71,87,0.16);color:#ff9aa5;border:1px solid rgba(255,71,87,0.35)}}
 .gamma-detail-list{{
     display:flex;
     flex-direction:column;
@@ -1192,6 +1305,7 @@ body::before{{
     .gamma-card-main{{font-size:16px}}
     .gamma-card-stats{{font-size:12px;color:#eef1f7}}
     .gamma-card-hint{{font-size:11px}}
+    .gamma-card-verify{{font-size:11px}}
 
     .chart-cell{{
         order:5;
@@ -1454,6 +1568,13 @@ function moneyFmt(value) {{
     return '$' + Math.round(value);
 }}
 
+function oiChangeFmt(c) {{
+    if (c.oi_change === null || c.oi_change === undefined) return 'Pending';
+    var sign = Number(c.oi_change) > 0 ? '+' : '';
+    var pct = (c.oi_change_pct === null || c.oi_change_pct === undefined) ? '' : ' / ' + sign + c.oi_change_pct + '%';
+    return sign + c.oi_change + pct;
+}}
+
 function openGammaDetails(btn) {{
     var row = btn.closest('.stock-row');
     var dataEl = row ? row.querySelector('.gamma-data') : null;
@@ -1484,7 +1605,10 @@ function openGammaDetails(btn) {{
                     <div class="gamma-detail-cell"><span class="gamma-detail-label">Bid / Ask</span><span class="gamma-detail-value">${{c.bid ?? '-'}} / ${{c.ask ?? '-'}}</span></div>
                     <div class="gamma-detail-cell"><span class="gamma-detail-label">Mid / IV</span><span class="gamma-detail-value">${{c.mid ?? '-'}} / ${{c.iv ?? '-'}}%</span></div>
                     <div class="gamma-detail-cell"><span class="gamma-detail-label">Moneyness</span><span class="gamma-detail-value">${{Number(c.pct_otm || 0).toFixed(1)}}%</span></div>
-                    <div class="gamma-detail-cell" style="grid-column:span 2"><span class="gamma-detail-label">Tags</span><span class="gamma-detail-value">${{c.tags || '-'}}</span></div>
+                    <div class="gamma-detail-cell"><span class="gamma-detail-label">Verification</span><span class="gamma-detail-value">${{c.verification || 'Pending'}}</span></div>
+                    <div class="gamma-detail-cell"><span class="gamma-detail-label">OI Change</span><span class="gamma-detail-value">${{oiChangeFmt(c)}}</span></div>
+                    <div class="gamma-detail-cell" style="grid-column:span 3"><span class="gamma-detail-label">Note</span><span class="gamma-detail-value">${{c.verification_note || '-'}}</span></div>
+                    <div class="gamma-detail-cell" style="grid-column:span 3"><span class="gamma-detail-label">Tags</span><span class="gamma-detail-value">${{c.tags || '-'}}</span></div>
                 </div>`;
             list.appendChild(div);
         }});
