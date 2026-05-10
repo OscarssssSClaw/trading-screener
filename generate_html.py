@@ -12,6 +12,162 @@ start = time.time()
 now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))
 last_updated = now.strftime("%Y-%m-%d %H:%M") + " HK"
 
+GAMMA_MIN_VOLUME = 500
+GAMMA_MIN_OI = 100
+GAMMA_MIN_VOL_OI = 5
+GAMMA_MIN_PREMIUM = 250_000
+GAMMA_MAX_DTE = 30
+GAMMA_MAX_EXPIRIES = 4
+
+def safe_float(value, default=0.0):
+    try:
+        if pd.isna(value):
+            return default
+        return float(value)
+    except Exception:
+        return default
+
+
+def fmt_money(value):
+    try:
+        value = float(value)
+    except Exception:
+        return "-"
+    if value >= 1_000_000:
+        return f"${value/1_000_000:.1f}M"
+    if value >= 1_000:
+        return f"${value/1_000:.0f}K"
+    return f"${value:.0f}"
+
+
+def option_mid(row):
+    bid = safe_float(row.get('bid'), 0.0)
+    ask = safe_float(row.get('ask'), 0.0)
+    last = safe_float(row.get('lastPrice'), 0.0)
+    if bid > 0 and ask > 0 and ask >= bid:
+        return (bid + ask) / 2
+    if last > 0:
+        return last
+    if ask > 0:
+        return ask
+    if bid > 0:
+        return bid
+    return 0.0
+
+
+def gamma_score(dte, pct_otm, vol_oi, premium, stock_context):
+    score = 20  # CALL-only setup
+    tags = ['CALL']
+
+    if dte <= 7:
+        score += 20; tags.append('0-7DTE')
+    elif dte <= 14:
+        score += 15; tags.append('8-14DTE')
+    elif dte <= 30:
+        score += 5; tags.append('15-30DTE')
+
+    if -2 <= pct_otm <= 10:
+        score += 20; tags.append('near/OTM')
+    elif 10 < pct_otm <= 20:
+        score += 10; tags.append('far-OTM')
+    elif pct_otm < -2:
+        score += 5; tags.append('ITM')
+
+    if vol_oi >= 10:
+        score += 20; tags.append('Vol/OI>=10')
+    elif vol_oi >= 5:
+        score += 12; tags.append('Vol/OI>=5')
+
+    if premium >= 1_000_000:
+        score += 15; tags.append('Prem>$1M')
+    elif premium >= 500_000:
+        score += 10; tags.append('Prem>$500K')
+    elif premium >= 250_000:
+        score += 5; tags.append('Prem>$250K')
+
+    if stock_context.get('near_high'):
+        score += 10; tags.append('Near high')
+    if stock_context.get('above_ma'):
+        score += 10; tags.append('Above MA')
+
+    return min(score, 100), ', '.join(tags)
+
+
+def get_gamma_squeeze_for_ticker(ticker, stock_price, price_rows=None):
+    """Find the best yfinance-visible gamma squeeze candidate for a stock.
+
+    This is a radar only. yfinance does not reveal buy-at-ask, sweeps, BTO/STO,
+    or real-time execution side.
+    """
+    empty = {'score': 0, 'display': '-', 'contract': '', 'tags': '', 'premium': 0, 'vol_oi': 0}
+    if ':' not in ticker or not stock_price or stock_price <= 0:
+        return empty
+    symbol = ticker.split(':')[1]
+    if symbol.startswith('OTC'):
+        return empty
+
+    stock_context = {'near_high': False, 'above_ma': False}
+    if price_rows and len(price_rows) >= 20:
+        closes = [r['close'] for r in price_rows if r.get('close')]
+        highs = [r['high'] for r in price_rows[-20:] if r.get('high')]
+        if closes:
+            ma20 = sum(closes[-20:]) / min(len(closes), 20)
+            stock_context['above_ma'] = stock_price >= ma20
+        if highs:
+            stock_context['near_high'] = stock_price >= max(highs) * 0.98
+
+    try:
+        t = yf.Ticker(symbol)
+        expiries = list(t.options or [])[:GAMMA_MAX_EXPIRIES]
+    except Exception:
+        return empty
+
+    today = pd.Timestamp.utcnow().normalize().tz_localize(None)
+    best = empty.copy()
+    for exp in expiries:
+        try:
+            dte = int((pd.Timestamp(exp) - today).days)
+        except Exception:
+            continue
+        if dte < 0 or dte > GAMMA_MAX_DTE:
+            continue
+        try:
+            calls = t.option_chain(exp).calls
+        except Exception:
+            continue
+        if calls is None or calls.empty:
+            continue
+        for _, row in calls.iterrows():
+            vol = safe_float(row.get('volume'), 0.0)
+            oi = safe_float(row.get('openInterest'), 0.0)
+            if vol < GAMMA_MIN_VOLUME or oi < GAMMA_MIN_OI:
+                continue
+            vol_oi = vol / oi if oi > 0 else 0
+            if vol_oi < GAMMA_MIN_VOL_OI:
+                continue
+            mid = option_mid(row)
+            premium = vol * mid * 100
+            if premium < GAMMA_MIN_PREMIUM:
+                continue
+            strike = safe_float(row.get('strike'), 0.0)
+            if strike <= 0:
+                continue
+            pct_otm = (strike / stock_price - 1) * 100
+            score, tags = gamma_score(dte, pct_otm, vol_oi, premium, stock_context)
+            if score > best['score'] or (score == best['score'] and premium > best['premium']):
+                best = {
+                    'score': score,
+                    'display': f"{score} / {exp} ${strike:g}C / {vol_oi:.1f}x / {fmt_money(premium)}",
+                    'contract': f"{exp} ${strike:g}C",
+                    'tags': tags,
+                    'premium': premium,
+                    'vol_oi': vol_oi,
+                    'dte': dte,
+                    'pct_otm': pct_otm,
+                }
+    return best
+
+
 def get_iv_for_ticker(ticker):
     if ':' not in ticker:
         return None
@@ -207,6 +363,20 @@ for i, ticker in enumerate(all_stocks['ticker'].tolist()):
     time.sleep(0.5)  # Rate limiting - increased delay
 print(f"Got IV for {len(iv_data)} stocks")
 
+print("Fetching gamma squeeze candidates...")
+gamma_data = {}
+for i, row in enumerate(all_stocks.itertuples()):
+    ticker = getattr(row, 'ticker')
+    close = safe_float(getattr(row, 'close', 0), 0.0)
+    gamma = get_gamma_squeeze_for_ticker(ticker, close, price_data.get(ticker, []))
+    if gamma and gamma.get('score', 0) > 0:
+        gamma_data[ticker] = gamma
+    if (i + 1) % 10 == 0:
+        print(f"  Gamma: {i+1}/{len(all_stocks)} stocks...")
+    time.sleep(0.25)
+gamma_count = sum(1 for g in gamma_data.values() if g.get('score', 0) >= 60)
+print(f"Got gamma candidates for {len(gamma_data)} stocks ({gamma_count} score >= 60)")
+
 def make_row(row, price_data, anim_delay=0):
     ticker = str(row['ticker'])
     name = str(row['name']).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
@@ -231,6 +401,11 @@ def make_row(row, price_data, anim_delay=0):
     else:
         iv_class = "none"
         iv_display = "-"
+    gamma = gamma_data.get(ticker, {'score': 0, 'display': '-', 'contract': '', 'tags': ''})
+    gamma_score_val = int(gamma.get('score', 0) or 0)
+    gamma_class = "high" if gamma_score_val >= 80 else "med" if gamma_score_val >= 60 else "low" if gamma_score_val > 0 else "none"
+    gamma_display = str(gamma_score_val) if gamma_score_val > 0 else "-"
+    gamma_title = str(gamma.get('display', '-')) + (" | " + str(gamma.get('tags', '')) if gamma.get('tags') else "")
     sector = str(row.get('sector', '-'))
     industry = str(row.get('industry', '-'))
     
@@ -254,19 +429,24 @@ def make_row(row, price_data, anim_delay=0):
         badges.append('<span class="strategy-badge strategy-htf">HTF</span>')
         classes.append('strategy-htf')
         strat_list.append('HTF')
+    if gamma_score_val >= 60:
+        badges.append(f'<span class="strategy-badge strategy-gamma">GS {gamma_score_val}</span>')
+        classes.append('strategy-gamma')
+        strat_list.append('Gamma')
     
     badges_str = ''.join(badges)
     classes_str = ' '.join(classes)
     data_strategies = ','.join(strat_list)
     
     return f'''
-    <div class="stock-row {classes_str}" data-strategies="{data_strategies}" data-rs="{rs:.1f}" data-iv="{iv_val}" data-price="{close}" data-dist="{dist_high:.1f}">
+    <div class="stock-row {classes_str}" data-strategies="{data_strategies}" data-rs="{rs:.1f}" data-iv="{iv_val}" data-gamma="{gamma_score_val}" data-price="{close}" data-dist="{dist_high:.1f}">
         <div class="stock-header">
             <div class="stock-name">{name}</div>
             <div class="stock-ticker">{ticker} {badges_str}</div>
             <div class="stock-sector">{sector} - {industry}</div>
         </div>
         <div class="metric iv-metric">IV<br><span class="iv-value iv-{iv_class}">{iv_display}</span></div>
+        <div class="metric gamma-metric" title="{gamma_title}">GS<br><span class="gamma-value gamma-{gamma_class}">{gamma_display}</span></div>
         <div class="stock-price">${close:.2f}</div>
         <div class="metric">Dist<br><span class="{dist_color}">{dist_high:.1f}%</span></div>
         <div class="metric">6M<br><span class="{perf_color}">{perf_6m:.1f}%</span></div>
@@ -303,6 +483,7 @@ html = f'''<!DOCTYPE html>
     --red: #ff4757;
     --orange: #ff9f43;
     --blue: #3b82f6;
+    --purple: #a855f7;
 }}
 
 body{{
@@ -578,6 +759,19 @@ body::before{{
 .strategy-badge.strategy-vcp{{background:var(--blue)}}
 .strategy-badge.strategy-qullamaggie{{background:var(--red)}}
 .strategy-badge.strategy-htf{{background:var(--accent);color:#000}}
+.strategy-badge.strategy-gamma{{background:var(--purple);color:#fff}}
+
+.gamma-value{{
+    font-size:15px;
+    font-weight:700;
+    padding:4px 10px;
+    border-radius:4px;
+    display:inline-block;
+}}
+.gamma-high{{background:var(--purple);color:#fff}}
+.gamma-med{{background:var(--blue);color:#fff}}
+.gamma-low{{background:var(--bg-secondary);color:var(--text-secondary);border:1px solid var(--border)}}
+.gamma-none{{color:var(--text-muted)}}
 
 .chart-cell{{
     flex:1;
@@ -695,12 +889,14 @@ body::before{{
         <option value="VCP">VCP ({vcp_count})</option>
         <option value="Qullamaggie">Qullamaggie ({ql_count})</option>
         <option value="HTF">HTF ({htf_count})</option>
+        <option value="Gamma">Gamma Squeeze ({gamma_count})</option>
     </select>
     <select class="filter-select" id="sortFilter" onchange="sortChanged()">
         <option value="rs-desc">RS ↓ (High to Low)</option>
         <option value="rs-asc">RS ↑ (Low to High)</option>
         <option value="iv-desc">IV ↓ (High to Low)</option>
         <option value="iv-asc">IV ↑ (Low to High)</option>
+        <option value="gamma-desc">GS ↓ (Gamma Score)</option>
         <option value="price-desc">Price ↓</option>
         <option value="price-asc">Price ↑</option>
         <option value="dist-asc">Dist ↑ (Near High)</option>
@@ -734,6 +930,10 @@ body::before{{
         <div class="modal-section">
             <h3>RS (Relative Strength)</h3>
             <p>Stock's 6M return minus SPY's 6M return.<br>Positive = outperforming market.</p>
+        </div>
+        <div class="modal-section">
+            <h3>GS (Gamma Squeeze Candidate)</h3>
+            <p>Short-dated CALL Vol/OI spike with near/OTM strike, estimated premium, and stock momentum context.<br>yfinance cannot confirm buy-at-ask, sweeps, BTO/STO, or whale intent — use UW/flow data to confirm.</p>
         </div>
         <button class="modal-close" onclick="closeInfo()">Got it ✓</button>
     </div>
@@ -824,6 +1024,8 @@ function showAllRows() {{
             return parseFloat(b.getAttribute('data-iv') || 0) - parseFloat(a.getAttribute('data-iv') || 0);
         }} else if (currentSort === 'iv-asc') {{
             return parseFloat(a.getAttribute('data-iv') || 0) - parseFloat(b.getAttribute('data-iv') || 0);
+        }} else if (currentSort === 'gamma-desc') {{
+            return parseFloat(b.getAttribute('data-gamma') || 0) - parseFloat(a.getAttribute('data-gamma') || 0);
         }} else if (currentSort === 'price-desc') {{
             return parseFloat(b.getAttribute('data-price') || 0) - parseFloat(a.getAttribute('data-price') || 0);
         }} else if (currentSort === 'price-asc') {{
