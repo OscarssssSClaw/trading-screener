@@ -7,6 +7,7 @@ import yfinance as yf
 from tradingview_screener import Query, Column
 import pandas as pd
 import json
+import html
 
 start = time.time()
 now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))
@@ -99,7 +100,7 @@ def get_gamma_squeeze_for_ticker(ticker, stock_price, price_rows=None):
     This is a radar only. yfinance does not reveal buy-at-ask, sweeps, BTO/STO,
     or real-time execution side.
     """
-    empty = {'score': 0, 'display': '-', 'contract': '', 'tags': '', 'premium': 0, 'vol_oi': 0}
+    empty = {'score': 0, 'display': '-', 'contract': '', 'tags': '', 'premium': 0, 'vol_oi': 0, 'contracts': []}
     if ':' not in ticker or not stock_price or stock_price <= 0:
         return empty
     symbol = ticker.split(':')[1]
@@ -123,7 +124,7 @@ def get_gamma_squeeze_for_ticker(ticker, stock_price, price_rows=None):
         return empty
 
     today = pd.Timestamp.utcnow().normalize().tz_localize(None)
-    best = empty.copy()
+    candidates = []
     for exp in expiries:
         try:
             dte = int((pd.Timestamp(exp) - today).days)
@@ -154,18 +155,46 @@ def get_gamma_squeeze_for_ticker(ticker, stock_price, price_rows=None):
                 continue
             pct_otm = (strike / stock_price - 1) * 100
             score, tags = gamma_score(dte, pct_otm, vol_oi, premium, stock_context)
-            if score > best['score'] or (score == best['score'] and premium > best['premium']):
-                best = {
-                    'score': score,
-                    'display': f"{score} / {exp} ${strike:g}C / {vol_oi:.1f}x / {fmt_money(premium)}",
-                    'contract': f"{exp} ${strike:g}C",
-                    'tags': tags,
-                    'premium': premium,
-                    'vol_oi': vol_oi,
-                    'dte': dte,
-                    'pct_otm': pct_otm,
-                }
-    return best
+            candidate = {
+                'score': int(score),
+                'expiry': exp,
+                'strike': strike,
+                'contract': f"{exp} ${strike:g}C",
+                'type': 'CALL',
+                'volume': int(vol),
+                'openInterest': int(oi),
+                'vol_oi': round(vol_oi, 2),
+                'mid': round(mid, 2),
+                'premium': round(premium, 0),
+                'premium_fmt': fmt_money(premium),
+                'dte': int(dte),
+                'pct_otm': round(pct_otm, 1),
+                'iv': round(safe_float(row.get('impliedVolatility'), 0.0) * 100, 1),
+                'last': round(safe_float(row.get('lastPrice'), 0.0), 2),
+                'bid': round(safe_float(row.get('bid'), 0.0), 2),
+                'ask': round(safe_float(row.get('ask'), 0.0), 2),
+                'tags': tags,
+            }
+            candidates.append(candidate)
+
+    if not candidates:
+        return empty
+
+    candidates = sorted(candidates, key=lambda c: (c['premium'], c['score']), reverse=True)[:12]
+    primary = candidates[0]
+    best_score = max(c['score'] for c in candidates)
+    return {
+        'score': best_score,
+        'display': f"{best_score} / {primary['contract']} / {primary['vol_oi']:.1f}x / {primary['premium_fmt']}",
+        'contract': primary['contract'],
+        'tags': primary['tags'],
+        'premium': primary['premium'],
+        'premium_fmt': primary['premium_fmt'],
+        'vol_oi': primary['vol_oi'],
+        'dte': primary['dte'],
+        'pct_otm': primary['pct_otm'],
+        'contracts': candidates,
+    }
 
 
 def get_iv_for_ticker(ticker):
@@ -401,11 +430,23 @@ def make_row(row, price_data, anim_delay=0):
     else:
         iv_class = "none"
         iv_display = "-"
-    gamma = gamma_data.get(ticker, {'score': 0, 'display': '-', 'contract': '', 'tags': ''})
+    gamma = gamma_data.get(ticker, {'score': 0, 'display': '-', 'contract': '', 'tags': '', 'contracts': []})
     gamma_score_val = int(gamma.get('score', 0) or 0)
     gamma_class = "high" if gamma_score_val >= 80 else "med" if gamma_score_val >= 60 else "low" if gamma_score_val > 0 else "none"
     gamma_display = str(gamma_score_val) if gamma_score_val > 0 else "-"
+    gamma_contracts = gamma.get('contracts', []) or []
+    primary_contract = gamma_contracts[0] if gamma_contracts else {}
     gamma_title = str(gamma.get('display', '-')) + (" | " + str(gamma.get('tags', '')) if gamma.get('tags') else "")
+    gamma_json = html.escape(json.dumps(gamma_contracts), quote=False)
+    if primary_contract:
+        gamma_card = f"""<button class=\"gamma-contract-card\" type=\"button\" onclick=\"openGammaDetails(this)\">
+            <span class=\"gamma-card-kicker\">Largest GS Contract</span>
+            <span class=\"gamma-card-main\">{html.escape(str(primary_contract.get('contract', '-')))}</span>
+            <span class=\"gamma-card-stats\">Prem {html.escape(str(primary_contract.get('premium_fmt', '-')))} · Vol/OI {safe_float(primary_contract.get('vol_oi'), 0):.1f}x · DTE {int(primary_contract.get('dte', 0) or 0)} · {safe_float(primary_contract.get('pct_otm'), 0):+.1f}% OTM</span>
+            <span class=\"gamma-card-hint\">Tap for {len(gamma_contracts)} records</span>
+        </button><script type=\"application/json\" class=\"gamma-data\">{gamma_json}</script>"""
+    else:
+        gamma_card = '' 
     sector = str(row.get('sector', '-'))
     industry = str(row.get('industry', '-'))
     
@@ -450,6 +491,7 @@ def make_row(row, price_data, anim_delay=0):
             <div class="metric iv-metric">IV<br><span class="iv-value iv-{iv_class}">{iv_display}</span></div>
             <div class="metric gamma-metric" title="{gamma_title}">GS<br><span class="gamma-value gamma-{gamma_class}">{gamma_display}</span></div>
         </div>
+        {gamma_card}
         <div class="secondary-metrics">
             <div class="metric">Dist<br><span class="{dist_color}">{dist_high:.1f}%</span></div>
             <div class="metric">6M<br><span class="{perf_color}">{perf_6m:.1f}%</span></div>
@@ -481,8 +523,8 @@ html = f'''<!DOCTYPE html>
     --accent: #00ff88;
     --accent-dim: #00ff8833;
     --text-primary: #f0f2f5;
-    --text-secondary: #8b919e;
-    --text-muted: #555a66;
+    --text-secondary: #b7bdc9;
+    --text-muted: #858b98;
     --border: #2a2e3a;
     --red: #ff4757;
     --orange: #ff9f43;
@@ -495,7 +537,7 @@ body{{
     background:var(--bg-primary);
     color:var(--text-primary);
     min-height:100vh;
-    line-height:1.4;
+    line-height:1.5;
 }}
 
 /* Grain overlay */
@@ -700,14 +742,14 @@ body::before{{
 
 .stock-name{{
     font-weight:700;
-    font-size:15px;
-    color:var(--text-primary);
+    font-size:16px;
+    color:#ffffff;
     margin-bottom:4px;
 }}
 
 .stock-ticker{{
     color:var(--text-secondary);
-    font-size:11px;
+    font-size:12px;
     display:flex;
     align-items:center;
     gap:6px;
@@ -788,6 +830,106 @@ body::before{{
 .gamma-med{{background:var(--blue);color:#fff}}
 .gamma-low{{background:var(--bg-secondary);color:var(--text-secondary);border:1px solid var(--border)}}
 .gamma-none{{color:var(--text-muted)}}
+
+.gamma-contract-card{{
+    width:260px;
+    min-width:240px;
+    background:linear-gradient(135deg, rgba(168,85,247,0.16), rgba(59,130,246,0.10));
+    border:1px solid rgba(168,85,247,0.55);
+    color:var(--text-primary);
+    border-radius:12px;
+    padding:10px 12px;
+    text-align:left;
+    cursor:pointer;
+    font-family:inherit;
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+    transition:all 0.2s;
+}}
+.gamma-contract-card:hover{{
+    border-color:var(--purple);
+    box-shadow:0 0 22px rgba(168,85,247,0.20);
+    transform:translateY(-1px);
+}}
+.gamma-card-kicker{{
+    font-size:9px;
+    text-transform:uppercase;
+    letter-spacing:1px;
+    color:#c4b5fd;
+    font-weight:800;
+}}
+.gamma-card-main{{
+    font-size:14px;
+    font-weight:900;
+    color:#ffffff;
+    letter-spacing:-0.2px;
+}}
+.gamma-card-stats{{
+    font-size:11px;
+    line-height:1.35;
+    color:#d8dce6;
+}}
+.gamma-card-hint{{
+    font-size:10px;
+    color:var(--accent);
+    font-weight:800;
+}}
+.gamma-detail-list{{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+}}
+.gamma-detail-row{{
+    background:rgba(255,255,255,0.035);
+    border:1px solid var(--border);
+    border-radius:12px;
+    padding:12px;
+}}
+.gamma-detail-top{{
+    display:flex;
+    justify-content:space-between;
+    gap:10px;
+    align-items:center;
+    margin-bottom:8px;
+}}
+.gamma-detail-contract{{
+    font-size:15px;
+    font-weight:900;
+    color:#fff;
+}}
+.gamma-detail-score{{
+    background:var(--purple);
+    color:#fff;
+    border-radius:999px;
+    padding:4px 8px;
+    font-size:11px;
+    font-weight:900;
+}}
+.gamma-detail-grid{{
+    display:grid;
+    grid-template-columns:repeat(3, 1fr);
+    gap:8px;
+}}
+.gamma-detail-cell{{
+    background:rgba(0,0,0,0.18);
+    border-radius:8px;
+    padding:7px 8px;
+}}
+.gamma-detail-label{{
+    display:block;
+    font-size:9px;
+    color:var(--text-muted);
+    text-transform:uppercase;
+    letter-spacing:0.6px;
+}}
+.gamma-detail-value{{
+    display:block;
+    font-size:12px;
+    color:var(--text-primary);
+    font-weight:800;
+    margin-top:2px;
+}}
 
 .chart-cell{{
     flex:1;
@@ -1038,8 +1180,21 @@ body::before{{
         border-radius:999px;
     }}
 
-    .chart-cell{{
+    .gamma-contract-card{{
         order:4;
+        width:100%;
+        min-width:0;
+        padding:12px;
+        border-radius:14px;
+        background:linear-gradient(135deg, rgba(168,85,247,0.22), rgba(59,130,246,0.12));
+    }}
+    .gamma-card-kicker{{font-size:10px}}
+    .gamma-card-main{{font-size:16px}}
+    .gamma-card-stats{{font-size:12px;color:#eef1f7}}
+    .gamma-card-hint{{font-size:11px}}
+
+    .chart-cell{{
+        order:5;
         flex:1 1 100%;
         width:100%;
         min-width:0;
@@ -1127,6 +1282,13 @@ body::before{{
             <p>Short-dated CALL Vol/OI spike with near/OTM strike, estimated premium, and stock momentum context.<br>yfinance cannot confirm buy-at-ask, sweeps, BTO/STO, or whale intent — use UW/flow data to confirm.</p>
         </div>
         <button class="modal-close" onclick="closeInfo()">Got it ✓</button>
+    </div>
+</div>
+<div class="modal" id="gammaModal">
+    <div class="modal-content gamma-modal-content">
+        <div class="modal-title" id="gammaModalTitle">Gamma Contracts</div>
+        <div class="gamma-detail-list" id="gammaDetailList"></div>
+        <button class="modal-close" onclick="closeGammaDetails()">Close ✓</button>
     </div>
 </div>
 <div class="content">
@@ -1265,7 +1427,7 @@ showRowsForFilter('all');
 document.querySelectorAll('.stock-row').forEach(function(row) {{
     row.addEventListener('click', function(e) {{
         // Don't copy if clicking on chart
-        if (e.target.closest('.chart-cell')) return;
+        if (e.target.closest('.chart-cell') || e.target.closest('.gamma-contract-card') || e.target.closest('.modal')) return;
         
         var ticker = row.querySelector('.stock-ticker');
         if (ticker) {{
@@ -1283,6 +1445,59 @@ document.querySelectorAll('.stock-row').forEach(function(row) {{
             }});
         }}
     }});
+}});
+
+function moneyFmt(value) {{
+    value = Number(value || 0);
+    if (value >= 1000000) return '$' + (value / 1000000).toFixed(1) + 'M';
+    if (value >= 1000) return '$' + Math.round(value / 1000) + 'K';
+    return '$' + Math.round(value);
+}}
+
+function openGammaDetails(btn) {{
+    var row = btn.closest('.stock-row');
+    var dataEl = row ? row.querySelector('.gamma-data') : null;
+    var list = document.getElementById('gammaDetailList');
+    var title = document.getElementById('gammaModalTitle');
+    list.innerHTML = '';
+    if (!dataEl) return;
+    var contracts = [];
+    try {{ contracts = JSON.parse(dataEl.textContent || '[]'); }} catch(e) {{ contracts = []; }}
+    var ticker = row && row.querySelector('.stock-ticker') ? row.querySelector('.stock-ticker').textContent.trim().split(' ')[0] : '';
+    title.textContent = ticker ? ticker + ' Gamma Contracts' : 'Gamma Contracts';
+    if (!contracts.length) {{
+        list.innerHTML = '<div class="modal-section"><p>No gamma contract records available.</p></div>';
+    }} else {{
+        contracts.forEach(function(c, idx) {{
+            var div = document.createElement('div');
+            div.className = 'gamma-detail-row';
+            div.innerHTML = `
+                <div class="gamma-detail-top">
+                    <div class="gamma-detail-contract">${{idx === 0 ? '⭐ ' : ''}}${{c.contract || '-'}}</div>
+                    <div class="gamma-detail-score">GS ${{c.score || '-'}}</div>
+                </div>
+                <div class="gamma-detail-grid">
+                    <div class="gamma-detail-cell"><span class="gamma-detail-label">Premium</span><span class="gamma-detail-value">${{c.premium_fmt || moneyFmt(c.premium)}}</span></div>
+                    <div class="gamma-detail-cell"><span class="gamma-detail-label">Vol/OI</span><span class="gamma-detail-value">${{Number(c.vol_oi || 0).toFixed(1)}}x</span></div>
+                    <div class="gamma-detail-cell"><span class="gamma-detail-label">DTE</span><span class="gamma-detail-value">${{c.dte ?? '-'}}</span></div>
+                    <div class="gamma-detail-cell"><span class="gamma-detail-label">Vol / OI</span><span class="gamma-detail-value">${{c.volume || '-'}} / ${{c.openInterest || '-'}}</span></div>
+                    <div class="gamma-detail-cell"><span class="gamma-detail-label">Bid / Ask</span><span class="gamma-detail-value">${{c.bid ?? '-'}} / ${{c.ask ?? '-'}}</span></div>
+                    <div class="gamma-detail-cell"><span class="gamma-detail-label">Mid / IV</span><span class="gamma-detail-value">${{c.mid ?? '-'}} / ${{c.iv ?? '-'}}%</span></div>
+                    <div class="gamma-detail-cell"><span class="gamma-detail-label">Moneyness</span><span class="gamma-detail-value">${{Number(c.pct_otm || 0).toFixed(1)}}%</span></div>
+                    <div class="gamma-detail-cell" style="grid-column:span 2"><span class="gamma-detail-label">Tags</span><span class="gamma-detail-value">${{c.tags || '-'}}</span></div>
+                </div>`;
+            list.appendChild(div);
+        }});
+    }}
+    document.getElementById('gammaModal').classList.add('show');
+}}
+
+function closeGammaDetails() {{
+    document.getElementById('gammaModal').classList.remove('show');
+}}
+
+document.getElementById('gammaModal').addEventListener('click', function(e) {{
+    if (e.target === this) closeGammaDetails();
 }});
 
 function showInfo() {{
