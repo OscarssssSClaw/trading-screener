@@ -445,13 +445,17 @@ def make_row(row, price_data, anim_delay=0):
             <div class="stock-ticker">{ticker} {badges_str}</div>
             <div class="stock-sector">{sector} - {industry}</div>
         </div>
-        <div class="metric iv-metric">IV<br><span class="iv-value iv-{iv_class}">{iv_display}</span></div>
-        <div class="metric gamma-metric" title="{gamma_title}">GS<br><span class="gamma-value gamma-{gamma_class}">{gamma_display}</span></div>
-        <div class="stock-price">${close:.2f}</div>
-        <div class="metric">Dist<br><span class="{dist_color}">{dist_high:.1f}%</span></div>
-        <div class="metric">6M<br><span class="{perf_color}">{perf_6m:.1f}%</span></div>
-        <div class="metric">RS<br><span class="{rs_color}">{rs:.1f}%</span></div>
-        <div class="metric">ADR<br>{adr:.1f}%</div>
+        <div class="mobile-primary-metrics">
+            <div class="stock-price">${close:.2f}</div>
+            <div class="metric iv-metric">IV<br><span class="iv-value iv-{iv_class}">{iv_display}</span></div>
+            <div class="metric gamma-metric" title="{gamma_title}">GS<br><span class="gamma-value gamma-{gamma_class}">{gamma_display}</span></div>
+        </div>
+        <div class="secondary-metrics">
+            <div class="metric">Dist<br><span class="{dist_color}">{dist_high:.1f}%</span></div>
+            <div class="metric">6M<br><span class="{perf_color}">{perf_6m:.1f}%</span></div>
+            <div class="metric">RS<br><span class="{rs_color}">{rs:.1f}%</span></div>
+            <div class="metric">ADR<br>{adr:.1f}%</div>
+        </div>
         <div class="chart-cell" id="{chart_id}"></div>
         <script type="application/json" class="chart-data">{price_json}</script>
     </div>'''
@@ -677,6 +681,18 @@ body::before{{
     }}
 }}
 
+.mobile-primary-metrics{{
+    display:flex;
+    align-items:center;
+    gap:14px;
+}}
+
+.secondary-metrics{{
+    display:flex;
+    align-items:center;
+    gap:14px;
+}}
+
 .stock-info{{
     flex:1.5;
     min-width:180px;
@@ -863,13 +879,188 @@ body::before{{
 
 /* Mobile responsive */
 @media (max-width:768px){{
-    .header{{flex-direction:column;gap:12px;text-align:center}}
-    .header::before{{width:100%;height:3px;top:0}}
-    .header-meta{{align-items:center}}
-    .filter-section{{top:48px}}
-    .stock-row{{flex-wrap:wrap;padding:16px}}
-    .stock-info{{flex:1 1 100%;margin-bottom:8px}}
-    .chart-cell{{flex:1 1 100%;margin-top:8px}}
+    body{{
+        background:#07080b;
+    }}
+
+    .header{{
+        position:relative;
+        flex-direction:row;
+        gap:10px;
+        text-align:left;
+        padding:10px 14px;
+        align-items:center;
+    }}
+    .header::before{{width:100%;height:2px;top:0}}
+    .header h1{{font-size:15px;white-space:nowrap}}
+    .header-meta{{
+        margin-left:auto;
+        gap:4px;
+        align-items:flex-end;
+        flex-direction:column;
+    }}
+    .header-meta p{{font-size:9px;line-height:1.1}}
+    .info-btn{{
+        padding:6px 8px;
+        font-size:0;
+        min-width:34px;
+    }}
+    .info-btn::before{{
+        content:'ℹ️';
+        font-size:14px;
+    }}
+
+    .filter-section{{
+        position:sticky;
+        top:0;
+        z-index:100;
+        padding:10px 12px;
+        gap:8px;
+        display:grid;
+        grid-template-columns:1fr 1fr;
+        background:rgba(18,20,26,0.96);
+        backdrop-filter:blur(14px);
+    }}
+    .filter-label{{
+        grid-column:1 / -1;
+        font-size:9px;
+        letter-spacing:1.6px;
+        color:var(--accent);
+    }}
+    .filter-select{{
+        width:100%;
+        min-width:0;
+        padding:10px 28px 10px 10px;
+        font-size:12px;
+        border-radius:10px;
+    }}
+
+    .content{{padding:12px}}
+
+    .stock-row{{
+        flex-wrap:wrap;
+        display:none;
+        padding:14px;
+        margin-bottom:10px;
+        gap:10px;
+        border-radius:16px;
+        background:linear-gradient(145deg, rgba(26,29,38,0.98), rgba(14,16,22,0.98));
+    }}
+    .stock-row.visible{{
+        display:grid;
+        grid-template-columns:1fr;
+        animation:none;
+    }}
+    .stock-row:hover{{
+        transform:none;
+    }}
+
+    .stock-header{{
+        min-width:0;
+        width:100%;
+    }}
+    .stock-name{{
+        font-size:16px;
+        line-height:1.15;
+        margin-bottom:6px;
+        white-space:nowrap;
+        overflow:hidden;
+        text-overflow:ellipsis;
+    }}
+    .stock-ticker{{
+        font-size:12px;
+        gap:5px;
+    }}
+    .stock-sector{{
+        font-size:10px;
+        white-space:nowrap;
+        overflow:hidden;
+        text-overflow:ellipsis;
+    }}
+
+    .mobile-primary-metrics{{
+        width:100%;
+        display:grid;
+        grid-template-columns:1fr 74px 74px;
+        gap:8px;
+        align-items:stretch;
+        order:2;
+    }}
+    .stock-price{{
+        min-width:0;
+        text-align:left;
+        font-size:22px;
+        display:flex;
+        align-items:center;
+        padding:8px 10px;
+        background:rgba(255,255,255,0.035);
+        border:1px solid var(--border);
+        border-radius:12px;
+    }}
+    .iv-metric,.gamma-metric{{
+        min-width:0;
+        padding:7px 6px;
+        background:rgba(255,255,255,0.035);
+        border:1px solid var(--border);
+        border-radius:12px;
+    }}
+    .iv-value,.gamma-value{{
+        font-size:13px;
+        padding:3px 8px;
+        margin-top:2px;
+    }}
+
+    .secondary-metrics{{
+        width:100%;
+        order:3;
+        display:grid;
+        grid-template-columns:repeat(4, 1fr);
+        gap:7px;
+    }}
+    .metric{{
+        min-width:0;
+        font-size:10px;
+        color:var(--text-muted);
+        padding:7px 5px;
+        background:rgba(255,255,255,0.025);
+        border:1px solid rgba(42,46,58,0.8);
+        border-radius:10px;
+    }}
+    .metric span{{
+        font-size:12px;
+        font-weight:700;
+        color:inherit;
+    }}
+
+    .strategy-badge{{
+        padding:3px 6px;
+        font-size:8px;
+        border-radius:999px;
+    }}
+
+    .chart-cell{{
+        order:4;
+        flex:1 1 100%;
+        width:100%;
+        min-width:0;
+        height:72px;
+        margin-top:0;
+        border-radius:12px;
+    }}
+
+    .modal-content{{
+        width:94%;
+        padding:22px;
+        border-radius:18px;
+    }}
+}}
+
+@media (max-width:380px){{
+    .mobile-primary-metrics{{
+        grid-template-columns:1fr 64px 64px;
+    }}
+    .stock-price{{font-size:19px}}
+    .filter-section{{grid-template-columns:1fr}}
 }}
 </style>
 </head>
