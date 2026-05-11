@@ -46,6 +46,8 @@ def verify_contract(symbol, candidate, history):
         candidate.update({
             'verification': 'Pending',
             'verification_note': 'First seen; need next OI update',
+            'first_seen_at': last_updated,
+            'first_seen_date': now.strftime('%Y-%m-%d'),
             'prev_oi': None,
             'oi_change': None,
             'oi_change_pct': None,
@@ -57,6 +59,8 @@ def verify_contract(symbol, candidate, history):
         candidate.update({
             'verification': 'Pending',
             'verification_note': 'Seen earlier today; need next OI update',
+            'first_seen_at': prev.get('first_seen_at') or prev.get('updated_at') or last_updated,
+            'first_seen_date': prev.get('first_seen_date') or prev.get('seen_date'),
             'prev_oi': int(prev.get('openInterest') or 0),
             'oi_change': None,
             'oi_change_pct': None,
@@ -84,6 +88,8 @@ def verify_contract(symbol, candidate, history):
     candidate.update({
         'verification': status,
         'verification_note': note,
+        'first_seen_at': prev.get('first_seen_at') or prev.get('updated_at') or last_updated,
+        'first_seen_date': prev.get('first_seen_date') or prev.get('seen_date'),
         'prev_oi': prev_oi,
         'oi_change': oi_change,
         'oi_change_pct': round(oi_change_pct, 1) if oi_change_pct is not None else None,
@@ -117,6 +123,9 @@ def save_gamma_history(gamma_data):
                 'pct_otm': c.get('pct_otm'),
                 'mid': c.get('mid'),
                 'vol_oi': c.get('vol_oi'),
+                'first_seen_at': c.get('first_seen_at') or last_updated,
+                'first_seen_date': c.get('first_seen_date') or now.strftime('%Y-%m-%d'),
+                'last_trade_time': c.get('last_trade_time'),
                 'seen_date': now.strftime('%Y-%m-%d'),
                 'updated_at': last_updated,
                 'total_call_volume': gamma.get('total_call_volume'),
@@ -284,6 +293,7 @@ def get_gamma_squeeze_for_ticker(ticker, stock_price, price_rows=None, history=N
                 'last': round(safe_float(row.get('lastPrice'), 0.0), 2),
                 'bid': round(safe_float(row.get('bid'), 0.0), 2),
                 'ask': round(safe_float(row.get('ask'), 0.0), 2),
+                'last_trade_time': fmt_yfinance_datetime(row.get('lastTradeDate')),
                 'tags': tags,
             }
             candidate = verify_contract(symbol, candidate, history)
@@ -343,6 +353,9 @@ def gamma_data_from_history(history):
             'bid': item.get('bid'),
             'ask': item.get('ask'),
             'tags': item.get('tags') or 'historical fallback',
+            'first_seen_at': item.get('first_seen_at') or item.get('updated_at') or '-',
+            'first_seen_date': item.get('first_seen_date') or item.get('seen_date'),
+            'last_trade_time': item.get('last_trade_time') or '-',
             'verification': 'Stale fallback',
             'verification_note': f"Using last saved record from {item.get('seen_date', 'history')}; live yfinance options returned no candidates",
             'prev_oi': item.get('openInterest'),
@@ -429,6 +442,19 @@ def fmt_date_from_epoch(value):
     except Exception:
         return '-'
 
+
+
+def fmt_yfinance_datetime(value):
+    if value is None or value == '':
+        return '-'
+    try:
+        ts = pd.Timestamp(value)
+        if ts.tzinfo is None:
+            ts = ts.tz_localize('UTC')
+        ts = ts.tz_convert('Asia/Hong_Kong')
+        return ts.strftime('%Y-%m-%d %H:%M HK')
+    except Exception:
+        return str(value)
 
 def get_short_interest_for_ticker(ticker):
     empty = {'short_float_pct': None, 'short_ratio': None, 'shares_short': None, 'shares_short_prior': None, 'shares_short_change': None, 'shares_short_change_pct': None, 'float_shares': None, 'date_short_interest': '-', 'fuel': 'None'}
@@ -1202,6 +1228,11 @@ body::before{{
     color:var(--accent);
     font-weight:800;
 }}
+.gamma-card-time{{
+    font-size:10px;
+    color:#d8dce6;
+    font-weight:700;
+}}
 .gamma-card-verify{{
     align-self:flex-start;
     font-size:10px;
@@ -1532,6 +1563,7 @@ body::before{{
     .gamma-card-main{{font-size:16px}}
     .gamma-card-stats{{font-size:12px;color:#eef1f7}}
     .gamma-card-hint{{font-size:11px}}
+    .gamma-card-time{{font-size:11px}}
     .gamma-card-verify{{font-size:11px}}
 
     .chart-cell{{
@@ -1624,7 +1656,7 @@ body::before{{
         </div>
         <div class="modal-section">
             <h3>GS (Gamma Squeeze Candidate)</h3>
-            <p>Short-dated CALL Vol/OI spike with near/OTM strike, estimated premium, and stock momentum context.<br>yfinance cannot confirm buy-at-ask, sweeps, BTO/STO, or whale intent — use UW/flow data to confirm.</p>
+            <p>Short-dated CALL Vol/OI spike with near/OTM strike, estimated premium, and stock momentum context.<br>First Seen is scanner detection time; Last Trade is yfinance contract lastTradeDate. yfinance cannot confirm buy-at-ask, sweeps, BTO/STO, or whale intent — use UW/flow data to confirm.</p>
         </div>
         <div class="modal-section">
             <h3>Short Fuel</h3>
@@ -1850,6 +1882,8 @@ function openGammaDetails(btn) {{
                     <div class="gamma-detail-cell"><span class="gamma-detail-label">Moneyness</span><span class="gamma-detail-value">${{Number(c.pct_otm || 0).toFixed(1)}}%</span></div>
                     <div class="gamma-detail-cell"><span class="gamma-detail-label">Verification</span><span class="gamma-detail-value">${{c.verification || 'Pending'}}</span></div>
                     <div class="gamma-detail-cell"><span class="gamma-detail-label">OI Change</span><span class="gamma-detail-value">${{oiChangeFmt(c)}}</span></div>
+                    <div class="gamma-detail-cell"><span class="gamma-detail-label">First Seen</span><span class="gamma-detail-value">${{c.first_seen_at || '-'}}</span></div>
+                    <div class="gamma-detail-cell"><span class="gamma-detail-label">Last Trade</span><span class="gamma-detail-value">${{c.last_trade_time || '-'}}</span></div>
                     <div class="gamma-detail-cell" style="grid-column:span 3"><span class="gamma-detail-label">Note</span><span class="gamma-detail-value">${{c.verification_note || '-'}}</span></div>
                     <div class="gamma-detail-cell" style="grid-column:span 3"><span class="gamma-detail-label">Tags</span><span class="gamma-detail-value">${{c.tags || '-'}}</span></div>
                 </div>`;
