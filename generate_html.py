@@ -444,6 +444,21 @@ def fmt_date_from_epoch(value):
 
 
 
+def get_benchmark_6m_perf(symbol='SPY'):
+    try:
+        hist = yf.Ticker(symbol).history(period='6mo', auto_adjust=True)
+        if hist is None or hist.empty or len(hist) < 2:
+            return 0.0
+        start_close = safe_float(hist['Close'].iloc[0], 0.0)
+        end_close = safe_float(hist['Close'].iloc[-1], 0.0)
+        if start_close <= 0 or end_close <= 0:
+            return 0.0
+        return (end_close / start_close - 1) * 100
+    except Exception as e:
+        print(f"WARNING: failed to fetch {symbol} 6M benchmark: {e}")
+        return 0.0
+
+
 def fmt_yfinance_datetime(value):
     if value is None or value == '':
         return '-'
@@ -607,15 +622,8 @@ except:
 
 print(f"HTF: {len(htf)}")
 
-spy_perf = 0
-try:
-    spy_result, spy_df = Query().select('Perf.6M').where(Column('name') == 'SPY').limit(1).get_scanner_data()
-    if len(spy_df) > 0:
-        spy_perf = float(spy_df['Perf.6M'].iloc[0])
-except:
-    pass
-
-print(f"SPY 6M: {spy_perf:.1f}%")
+spy_perf = get_benchmark_6m_perf('SPY')
+print(f"SPY 6M benchmark: {spy_perf:.1f}%")
 
 # Merge all three datasets on ticker to get multi-strategy stocks
 all_stocks = vcp.merge(ql[['ticker', 'is_ql']], on='ticker', how='outer')
@@ -1596,7 +1604,7 @@ body::before{{
 <div class="header">
     <h1>Trading <span>Screener</span></h1>
     <div class="header-meta">
-        <p>SPY 6M: <span>{spy_perf:.1f}%</span> | <span>{len(all_stocks)}</span> stocks</p>
+        <p>SPY 6M benchmark: <span>{spy_perf:.1f}%</span> | <span>{len(all_stocks)}</span> stocks</p>
         <p>Updated: {last_updated}</p>
     </div>
     <button class="info-btn" onclick="showInfo()">ℹ️ Info</button>
@@ -1652,7 +1660,7 @@ body::before{{
         </div>
         <div class="modal-section">
             <h3>RS (Relative Strength)</h3>
-            <p>Stock's 6M return minus SPY's 6M return.<br>Positive = outperforming market.</p>
+            <p>Stock's TradingView 6M return minus SPY's yfinance 6M return.<br>Positive = outperforming market by percentage points.</p>
         </div>
         <div class="modal-section">
             <h3>GS (Gamma Squeeze Candidate)</h3>
