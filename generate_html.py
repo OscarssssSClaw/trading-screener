@@ -119,6 +119,8 @@ def save_gamma_history(gamma_data):
                 'vol_oi': c.get('vol_oi'),
                 'seen_date': now.strftime('%Y-%m-%d'),
                 'updated_at': last_updated,
+                'total_call_volume': gamma.get('total_call_volume'),
+                'call_share_equiv': gamma.get('call_share_equiv'),
             }
     payload = {'updated_at': last_updated, 'contracts': contracts}
     GAMMA_HISTORY_PATH.write_text(json.dumps(payload, indent=2, sort_keys=True) + '\n')
@@ -229,6 +231,7 @@ def get_gamma_squeeze_for_ticker(ticker, stock_price, price_rows=None, history=N
 
     today = pd.Timestamp.utcnow().normalize().tz_localize(None)
     candidates = []
+    total_call_volume = 0
     for exp in expiries:
         try:
             dte = int((pd.Timestamp(exp) - today).days)
@@ -242,6 +245,10 @@ def get_gamma_squeeze_for_ticker(ticker, stock_price, price_rows=None, history=N
             continue
         if calls is None or calls.empty:
             continue
+        try:
+            total_call_volume += int(calls.get('volume', pd.Series(dtype=float)).fillna(0).sum())
+        except Exception:
+            pass
         for _, row in calls.iterrows():
             vol = safe_float(row.get('volume'), 0.0)
             oi = safe_float(row.get('openInterest'), 0.0)
@@ -298,6 +305,8 @@ def get_gamma_squeeze_for_ticker(ticker, stock_price, price_rows=None, history=N
         'vol_oi': primary['vol_oi'],
         'dte': primary['dte'],
         'pct_otm': primary['pct_otm'],
+        'total_call_volume': int(total_call_volume),
+        'call_share_equiv': int(total_call_volume * 100),
         'contracts': candidates,
     }
 
@@ -340,6 +349,8 @@ def gamma_data_from_history(history):
             'oi_change': None,
             'oi_change_pct': None,
         }
+        c['_total_call_volume'] = item.get('total_call_volume') or 0
+        c['_call_share_equiv'] = item.get('call_share_equiv') or 0
         grouped.setdefault(ticker, []).append(c)
     out = {}
     for ticker, contracts in grouped.items():
@@ -348,6 +359,12 @@ def gamma_data_from_history(history):
             continue
         primary = contracts[0]
         best_score = max(c.get('score') or 0 for c in contracts)
+        total_call_volume = max((c.get('_total_call_volume') or 0) for c in contracts)
+        if not total_call_volume:
+            total_call_volume = sum(int(c.get('volume') or 0) for c in contracts)
+        call_share_equiv = max((c.get('_call_share_equiv') or 0) for c in contracts)
+        if not call_share_equiv:
+            call_share_equiv = total_call_volume * 100
         out[ticker] = {
             'score': best_score,
             'display': f"{best_score} / {primary.get('contract')} / stale / {primary.get('premium_fmt')}",
@@ -358,6 +375,8 @@ def gamma_data_from_history(history):
             'vol_oi': primary.get('vol_oi'),
             'dte': primary.get('dte'),
             'pct_otm': primary.get('pct_otm'),
+            'total_call_volume': int(total_call_volume),
+            'call_share_equiv': int(call_share_equiv),
             'contracts': contracts,
         }
     return out
@@ -707,6 +726,16 @@ def make_row(row, price_data, anim_delay=0):
     short_date = si.get('date_short_interest', '-')
     short_class = "very-high" if short_fuel == 'Very High' else "high" if short_fuel == 'High' else "med" if short_fuel == 'Medium' else "none"
     short_title = f"Short float: {short_display} | {short_ratio_display} | Change: {short_change_display} | Date: {short_date}"
+    float_shares = si.get('float_shares')
+    call_share_equiv = gamma.get('call_share_equiv') or 0
+    total_call_volume = gamma.get('total_call_volume') or 0
+    call_float_pct = (call_share_equiv / float_shares * 100) if float_shares and float_shares > 0 else None
+    call_float_display = f"{call_float_pct:.2f}%" if call_float_pct is not None else "-"
+    call_float_class = "extreme" if call_float_pct is not None and call_float_pct >= 10 else "high" if call_float_pct is not None and call_float_pct >= 5 else "med" if call_float_pct is not None and call_float_pct >= 2 else "low" if call_float_pct is not None and call_float_pct > 0 else "none"
+    if float_shares:
+        call_float_title = f"Call volume share-equivalent: {call_share_equiv:,} shares ({total_call_volume:,} contracts) / float {float_shares:,}. Not delta-adjusted."
+    else:
+        call_float_title = "Call/Float unavailable: missing float shares. Not delta-adjusted."
     sector = str(row.get('sector', '-'))
     industry = str(row.get('industry', '-'))
     
@@ -739,13 +768,17 @@ def make_row(row, price_data, anim_delay=0):
         badges.append(f'<span class="strategy-badge strategy-short">{badge_text}</span>')
         classes.append('strategy-short')
         strat_list.append('ShortFuel')
+    if call_float_pct is not None and call_float_pct >= 5:
+        badges.append(f'<span class="strategy-badge strategy-callfloat">CF {call_float_pct:.1f}%</span>')
+        classes.append('strategy-callfloat')
+        strat_list.append('CallFloat')
     
     badges_str = ''.join(badges)
     classes_str = ' '.join(classes)
     data_strategies = ','.join(strat_list)
     
     return f'''
-    <div class="stock-row {classes_str}" data-strategies="{data_strategies}" data-rs="{rs:.1f}" data-iv="{iv_val}" data-gamma="{gamma_score_val}" data-short="{short_float if short_float is not None else 0}" data-price="{close}" data-dist="{dist_high:.1f}">
+    <div class="stock-row {classes_str}" data-strategies="{data_strategies}" data-rs="{rs:.1f}" data-iv="{iv_val}" data-gamma="{gamma_score_val}" data-short="{short_float if short_float is not None else 0}" data-callfloat="{call_float_pct if call_float_pct is not None else 0}" data-price="{close}" data-dist="{dist_high:.1f}">
         <div class="stock-header">
             <div class="stock-name">{name}</div>
             <div class="stock-ticker">{ticker} {badges_str}</div>
@@ -763,6 +796,7 @@ def make_row(row, price_data, anim_delay=0):
             <div class="metric">RS<br><span class="{rs_color}">{rs:.1f}%</span></div>
             <div class="metric">ADR<br>{adr:.1f}%</div>
             <div class="metric short-metric" title="{short_title}">Short<br><span class="short-value short-{short_class}">{short_display}</span></div>
+            <div class="metric callfloat-metric" title="{call_float_title}">Call/Float<br><span class="callfloat-value callfloat-{call_float_class}">{call_float_display}</span></div>
         </div>
         <div class="chart-cell" id="{chart_id}"></div>
         <script type="application/json" class="chart-data">{price_json}</script>
@@ -1085,6 +1119,7 @@ body::before{{
 .strategy-badge.strategy-htf{{background:var(--accent);color:#000}}
 .strategy-badge.strategy-gamma{{background:var(--purple);color:#fff}}
 .strategy-badge.strategy-short{{background:#f59e0b;color:#000}}
+.strategy-badge.strategy-callfloat{{background:#14b8a6;color:#001311}}
 
 .gamma-value{{
     font-size:15px;
@@ -1109,6 +1144,19 @@ body::before{{
 .short-high{{background:var(--orange);color:#000}}
 .short-med{{background:rgba(255,159,67,0.18);color:var(--orange);border:1px solid rgba(255,159,67,0.35)}}
 .short-none{{color:var(--text-muted)}}
+
+.callfloat-value{{
+    font-size:13px;
+    font-weight:800;
+    padding:3px 8px;
+    border-radius:4px;
+    display:inline-block;
+}}
+.callfloat-extreme{{background:var(--red);color:#fff}}
+.callfloat-high{{background:#14b8a6;color:#001311}}
+.callfloat-med{{background:rgba(20,184,166,0.18);color:#5eead4;border:1px solid rgba(20,184,166,0.35)}}
+.callfloat-low{{color:var(--text-secondary)}}
+.callfloat-none{{color:var(--text-muted)}}
 
 .gamma-contract-card{{
     width:260px;
@@ -1448,7 +1496,7 @@ body::before{{
         width:100%;
         order:3;
         display:grid;
-        grid-template-columns:repeat(5, 1fr);
+        grid-template-columns:repeat(6, 1fr);
         gap:7px;
     }}
     .metric{{
@@ -1530,6 +1578,7 @@ body::before{{
         <option value="HTF">HTF ({htf_count})</option>
         <option value="Gamma">Gamma Squeeze ({gamma_count})</option>
         <option value="ShortFuel">Short Fuel ({short_fuel_count})</option>
+        <option value="CallFloat">Call/Float</option>
     </select>
     <select class="filter-select" id="sortFilter" onchange="sortChanged()">
         <option value="rs-desc">RS ↓ (High to Low)</option>
@@ -1538,6 +1587,7 @@ body::before{{
         <option value="iv-asc">IV ↑ (Low to High)</option>
         <option value="gamma-desc">GS ↓ (Gamma Score)</option>
         <option value="short-desc">Short Float ↓</option>
+        <option value="callfloat-desc">Call/Float ↓</option>
         <option value="price-desc">Price ↓</option>
         <option value="price-asc">Price ↑</option>
         <option value="dist-asc">Dist ↑ (Near High)</option>
@@ -1579,6 +1629,10 @@ body::before{{
         <div class="modal-section">
             <h3>Short Fuel</h3>
             <p>Short Float % and days-to-cover from yfinance. High fuel = Short Float ≥ 10% or DTC ≥ 3; Very High = Short Float ≥ 20% or DTC ≥ 5.<br>Data can be delayed/stale, so treat it as squeeze context, not a real-time covering signal.</p>
+        </div>
+        <div class="modal-section">
+            <h3>Call/Float</h3>
+            <p>Total call volume in scanned expiries × 100 ÷ float shares. This is a share-equivalent pressure proxy, not delta-adjusted. ≥2% is notable, ≥5% high, ≥10% extreme.</p>
         </div>
         <button class="modal-close" onclick="closeInfo()">Got it ✓</button>
     </div>
@@ -1680,6 +1734,8 @@ function showAllRows() {{
             return parseFloat(b.getAttribute('data-gamma') || 0) - parseFloat(a.getAttribute('data-gamma') || 0);
         }} else if (currentSort === 'short-desc') {{
             return parseFloat(b.getAttribute('data-short') || 0) - parseFloat(a.getAttribute('data-short') || 0);
+        }} else if (currentSort === 'callfloat-desc') {{
+            return parseFloat(b.getAttribute('data-callfloat') || 0) - parseFloat(a.getAttribute('data-callfloat') || 0);
         }} else if (currentSort === 'price-desc') {{
             return parseFloat(b.getAttribute('data-price') || 0) - parseFloat(a.getAttribute('data-price') || 0);
         }} else if (currentSort === 'price-asc') {{
