@@ -334,6 +334,8 @@ def gamma_data_from_history(history):
             dte = int((pd.Timestamp(expiry) - pd.Timestamp.utcnow().normalize().tz_localize(None)).days)
         except Exception:
             dte = None
+        if dte is not None and dte < 0:
+            continue
         c = {
             'score': int(item.get('score') or 0),
             'expiry': expiry,
@@ -625,12 +627,41 @@ print(f"HTF: {len(htf)}")
 spy_perf = get_benchmark_6m_perf('SPY')
 print(f"SPY 6M benchmark: {spy_perf:.1f}%")
 
-# Merge all three datasets on ticker to get multi-strategy stocks
-all_stocks = vcp.merge(ql[['ticker', 'is_ql']], on='ticker', how='outer')
-all_stocks = all_stocks.merge(htf[['ticker', 'is_htf']], on='ticker', how='outer')
-all_stocks['is_vcp'] = all_stocks['is_vcp'].fillna(False).astype(bool)
-all_stocks['is_ql'] = all_stocks['is_ql'].fillna(False).astype(bool)
-all_stocks['is_htf'] = all_stocks['is_htf'].fillna(False).astype(bool)
+# Merge all three datasets on ticker while preserving full rows from every strategy.
+# Do not use VCP as the base table: QL-only candidates would lose name/price fields
+# and get filtered out as NaN later.
+frames = []
+for df, flag in ((vcp, 'is_vcp'), (ql, 'is_ql'), (htf, 'is_htf')):
+    if df is None or df.empty:
+        continue
+    tmp = df.copy()
+    for col in ('is_vcp', 'is_ql', 'is_htf'):
+        if col not in tmp.columns:
+            tmp[col] = False
+    tmp[flag] = True
+    frames.append(tmp)
+
+if frames:
+    merged = pd.concat(frames, ignore_index=True, sort=False)
+    flag_cols = ['is_vcp', 'is_ql', 'is_htf']
+    value_cols = [c for c in merged.columns if c not in flag_cols]
+    values = merged[value_cols].groupby('ticker', as_index=False).first()
+    flags = merged[['ticker'] + flag_cols].groupby('ticker', as_index=False).max()
+    all_stocks = values.merge(flags, on='ticker', how='left')
+else:
+    all_stocks = pd.DataFrame(columns=['ticker', 'is_vcp', 'is_ql', 'is_htf'])
+
+for col in ('is_vcp', 'is_ql', 'is_htf'):
+    all_stocks[col] = all_stocks[col].fillna(False).astype(bool)
+
+required_defaults = {
+    'name': '', 'close': 0.0, 'volume': 0, 'ADR': 0.0, 'Perf.6M': 0.0,
+    'SMA20': 0.0, 'SMA50': 0.0, 'High.All': 0.0, 'RSI': 0.0,
+    'sector': '-', 'industry': '-', 'dist_high': 0.0,
+}
+for col, default in required_defaults.items():
+    if col not in all_stocks.columns:
+        all_stocks[col] = default
 
 # Add RS
 all_stocks['RS'] = all_stocks['Perf.6M'] - spy_perf
@@ -710,7 +741,8 @@ print(f"Got short interest for {len(short_data)} stocks ({short_fuel_count} high
 
 def make_row(row, price_data, anim_delay=0):
     ticker = str(row['ticker'])
-    name = str(row['name']).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+    ticker_display = html.escape(ticker)
+    name = html.escape(str(row['name']))
     close = float(row['close'])
     dist_high = float(row['dist_high'])
     perf_6m = float(row['Perf.6M'])
@@ -720,6 +752,7 @@ def make_row(row, price_data, anim_delay=0):
     chart_id = "chart_" + ticker.replace(':', '_')
     price_json = json.dumps(price_data.get(ticker, []))
     iv_val = iv_data.get(ticker)
+    iv_attr = f'{iv_val:.4f}' if iv_val is not None else '0'
     if iv_val is not None and iv_val >= 1:
         iv_pct = iv_val  # already * 100
         if iv_pct >= 100:
@@ -738,13 +771,18 @@ def make_row(row, price_data, anim_delay=0):
     gamma_display = str(gamma_score_val) if gamma_score_val > 0 else "-"
     gamma_contracts = gamma.get('contracts', []) or []
     primary_contract = gamma_contracts[0] if gamma_contracts else {}
-    gamma_title = str(gamma.get('display', '-')) + (" | " + str(gamma.get('tags', '')) if gamma.get('tags') else "")
+    gamma_title = html.escape(str(gamma.get('display', '-')) + (" | " + str(gamma.get('tags', '')) if gamma.get('tags') else ""), quote=True)
     gamma_json = html.escape(json.dumps(gamma_contracts), quote=False)
     if primary_contract:
+        verify_text = str(primary_contract.get('verification', 'Pending'))
+        verify_class = html.escape(verify_text.lower().split()[0])
+        first_seen = html.escape(str(primary_contract.get('first_seen_at', '-')))
         gamma_card = f"""<button class=\"gamma-contract-card\" type=\"button\" onclick=\"openGammaDetails(this)\">
             <span class=\"gamma-card-kicker\">Largest GS Contract</span>
             <span class=\"gamma-card-main\">{html.escape(str(primary_contract.get('contract', '-')))}</span>
             <span class=\"gamma-card-stats\">Prem {html.escape(str(primary_contract.get('premium_fmt', '-')))} · Vol/OI {safe_float(primary_contract.get('vol_oi'), 0):.1f}x · DTE {int(primary_contract.get('dte', 0) or 0)} · {safe_float(primary_contract.get('pct_otm'), 0):+.1f}% OTM</span>
+            <span class=\"gamma-card-verify verify-{verify_class}\">{html.escape(verify_text)}</span>
+            <span class=\"gamma-card-time\">First seen: {first_seen}</span>
             <span class=\"gamma-card-hint\">Tap for {len(gamma_contracts)} records</span>
         </button><script type=\"application/json\" class=\"gamma-data\">{gamma_json}</script>"""
     else:
@@ -759,7 +797,7 @@ def make_row(row, price_data, anim_delay=0):
     short_change_display = f"{short_change:+.1f}%" if short_change is not None else "-"
     short_date = si.get('date_short_interest', '-')
     short_class = "very-high" if short_fuel == 'Very High' else "high" if short_fuel == 'High' else "med" if short_fuel == 'Medium' else "none"
-    short_title = f"Short float: {short_display} | {short_ratio_display} | Change: {short_change_display} | Date: {short_date}"
+    short_title = html.escape(f"Short float: {short_display} | {short_ratio_display} | Change: {short_change_display} | Date: {short_date}", quote=True)
     float_shares = si.get('float_shares')
     call_share_equiv = gamma.get('call_share_equiv') or 0
     total_call_volume = gamma.get('total_call_volume') or 0
@@ -767,11 +805,11 @@ def make_row(row, price_data, anim_delay=0):
     call_float_display = f"{call_float_pct:.2f}%" if call_float_pct is not None else "-"
     call_float_class = "extreme" if call_float_pct is not None and call_float_pct >= 10 else "high" if call_float_pct is not None and call_float_pct >= 5 else "med" if call_float_pct is not None and call_float_pct >= 2 else "low" if call_float_pct is not None and call_float_pct > 0 else "none"
     if float_shares:
-        call_float_title = f"Call volume share-equivalent: {call_share_equiv:,} shares ({total_call_volume:,} contracts) / float {float_shares:,}. Not delta-adjusted."
+        call_float_title = html.escape(f"Call volume share-equivalent: {call_share_equiv:,} shares ({total_call_volume:,} contracts) / float {float_shares:,}. Not delta-adjusted.", quote=True)
     else:
         call_float_title = "Call/Float unavailable: missing float shares. Not delta-adjusted."
-    sector = str(row.get('sector', '-'))
-    industry = str(row.get('industry', '-'))
+    sector = html.escape(str(row.get('sector', '-')))
+    industry = html.escape(str(row.get('industry', '-')))
     
     dist_color = "positive" if dist_high <= 20 else "negative"
     perf_color = "positive" if perf_6m > 0 else "negative"
@@ -812,10 +850,10 @@ def make_row(row, price_data, anim_delay=0):
     data_strategies = ','.join(strat_list)
     
     return f'''
-    <div class="stock-row {classes_str}" data-strategies="{data_strategies}" data-rs="{rs:.1f}" data-iv="{iv_val}" data-gamma="{gamma_score_val}" data-short="{short_float if short_float is not None else 0}" data-callfloat="{call_float_pct if call_float_pct is not None else 0}" data-price="{close}" data-dist="{dist_high:.1f}">
+    <div class="stock-row {classes_str}" data-strategies="{data_strategies}" data-rs="{rs:.1f}" data-iv="{iv_attr}" data-gamma="{gamma_score_val}" data-short="{short_float if short_float is not None else 0}" data-callfloat="{call_float_pct if call_float_pct is not None else 0}" data-price="{close}" data-dist="{dist_high:.1f}">
         <div class="stock-header">
             <div class="stock-name">{name}</div>
-            <div class="stock-ticker">{ticker} {badges_str}</div>
+            <div class="stock-ticker">{ticker_display} {badges_str}</div>
             <div class="stock-sector">{sector} - {industry}</div>
         </div>
         <div class="mobile-primary-metrics">
