@@ -128,8 +128,8 @@ def save_gamma_history(gamma_data):
                 'last_trade_time': c.get('last_trade_time'),
                 'seen_date': now.strftime('%Y-%m-%d'),
                 'updated_at': last_updated,
-                'total_call_volume': gamma.get('total_call_volume'),
-                'call_share_equiv': gamma.get('call_share_equiv'),
+                'contract_call_volume': c.get('volume'),
+                'call_share_equiv': c.get('call_share_equiv') or ((c.get('volume') or 0) * 100),
             }
     payload = {'updated_at': last_updated, 'contracts': contracts}
     GAMMA_HISTORY_PATH.write_text(json.dumps(payload, indent=2, sort_keys=True) + '\n')
@@ -240,7 +240,6 @@ def get_gamma_squeeze_for_ticker(ticker, stock_price, price_rows=None, history=N
 
     today = pd.Timestamp.utcnow().normalize().tz_localize(None)
     candidates = []
-    total_call_volume = 0
     for exp in expiries:
         try:
             dte = int((pd.Timestamp(exp) - today).days)
@@ -254,10 +253,6 @@ def get_gamma_squeeze_for_ticker(ticker, stock_price, price_rows=None, history=N
             continue
         if calls is None or calls.empty:
             continue
-        try:
-            total_call_volume += int(calls.get('volume', pd.Series(dtype=float)).fillna(0).sum())
-        except Exception:
-            pass
         for _, row in calls.iterrows():
             vol = safe_float(row.get('volume'), 0.0)
             oi = safe_float(row.get('openInterest'), 0.0)
@@ -282,6 +277,7 @@ def get_gamma_squeeze_for_ticker(ticker, stock_price, price_rows=None, history=N
                 'contract': f"{exp} ${strike:g}C",
                 'type': 'CALL',
                 'volume': int(vol),
+                'call_share_equiv': int(vol * 100),
                 'openInterest': int(oi),
                 'vol_oi': round(vol_oi, 2),
                 'mid': round(mid, 2),
@@ -315,8 +311,8 @@ def get_gamma_squeeze_for_ticker(ticker, stock_price, price_rows=None, history=N
         'vol_oi': primary['vol_oi'],
         'dte': primary['dte'],
         'pct_otm': primary['pct_otm'],
-        'total_call_volume': int(total_call_volume),
-        'call_share_equiv': int(total_call_volume * 100),
+        'contract_call_volume': int(primary.get('volume') or 0),
+        'call_share_equiv': int(primary.get('call_share_equiv') or ((primary.get('volume') or 0) * 100)),
         'contracts': candidates,
     }
 
@@ -343,6 +339,8 @@ def gamma_data_from_history(history):
             'contract': contract,
             'type': item.get('type', 'CALL'),
             'volume': item.get('volume'),
+            # Always recompute from this contract's volume; older history stored chain-level call_share_equiv.
+            'call_share_equiv': (item.get('volume') or 0) * 100,
             'openInterest': item.get('openInterest'),
             'vol_oi': item.get('vol_oi') or 0,
             'mid': item.get('mid'),
@@ -364,8 +362,6 @@ def gamma_data_from_history(history):
             'oi_change': None,
             'oi_change_pct': None,
         }
-        c['_total_call_volume'] = item.get('total_call_volume') or 0
-        c['_call_share_equiv'] = item.get('call_share_equiv') or 0
         grouped.setdefault(ticker, []).append(c)
     out = {}
     for ticker, contracts in grouped.items():
@@ -374,12 +370,8 @@ def gamma_data_from_history(history):
             continue
         primary = contracts[0]
         best_score = max(c.get('score') or 0 for c in contracts)
-        total_call_volume = max((c.get('_total_call_volume') or 0) for c in contracts)
-        if not total_call_volume:
-            total_call_volume = sum(int(c.get('volume') or 0) for c in contracts)
-        call_share_equiv = max((c.get('_call_share_equiv') or 0) for c in contracts)
-        if not call_share_equiv:
-            call_share_equiv = total_call_volume * 100
+        contract_call_volume = int(primary.get('volume') or 0)
+        call_share_equiv = contract_call_volume * 100
         out[ticker] = {
             'score': best_score,
             'display': f"{best_score} / {primary.get('contract')} / stale / {primary.get('premium_fmt')}",
@@ -390,8 +382,8 @@ def gamma_data_from_history(history):
             'vol_oi': primary.get('vol_oi'),
             'dte': primary.get('dte'),
             'pct_otm': primary.get('pct_otm'),
-            'total_call_volume': int(total_call_volume),
-            'call_share_equiv': int(call_share_equiv),
+            'contract_call_volume': contract_call_volume,
+            'call_share_equiv': call_share_equiv,
             'contracts': contracts,
         }
     return out
@@ -799,15 +791,15 @@ def make_row(row, price_data, anim_delay=0):
     short_class = "very-high" if short_fuel == 'Very High' else "high" if short_fuel == 'High' else "med" if short_fuel == 'Medium' else "none"
     short_title = html.escape(f"Short float: {short_display} | {short_ratio_display} | Change: {short_change_display} | Date: {short_date}", quote=True)
     float_shares = si.get('float_shares')
-    call_share_equiv = gamma.get('call_share_equiv') or 0
-    total_call_volume = gamma.get('total_call_volume') or 0
-    call_float_pct = (call_share_equiv / float_shares * 100) if float_shares and float_shares > 0 else None
+    contract_call_volume = int(primary_contract.get('volume') or gamma.get('contract_call_volume') or 0)
+    call_share_equiv = int(primary_contract.get('call_share_equiv') or gamma.get('call_share_equiv') or contract_call_volume * 100)
+    call_float_pct = (call_share_equiv / float_shares * 100) if float_shares and float_shares > 0 and primary_contract else None
     call_float_display = f"{call_float_pct:.2f}%" if call_float_pct is not None else "-"
     call_float_class = "extreme" if call_float_pct is not None and call_float_pct >= 10 else "high" if call_float_pct is not None and call_float_pct >= 5 else "med" if call_float_pct is not None and call_float_pct >= 2 else "low" if call_float_pct is not None and call_float_pct > 0 else "none"
     if float_shares:
-        call_float_title = html.escape(f"Call volume share-equivalent: {call_share_equiv:,} shares ({total_call_volume:,} contracts) / float {float_shares:,}. Not delta-adjusted.", quote=True)
+        call_float_title = html.escape(f"Displayed contract volume share-equivalent: {call_share_equiv:,} shares ({contract_call_volume:,} contracts) / float {float_shares:,}. Not delta-adjusted.", quote=True)
     else:
-        call_float_title = "Call/Float unavailable: missing float shares. Not delta-adjusted."
+        call_float_title = "Call/Float unavailable: missing float shares or no displayed gamma contract. Not delta-adjusted."
     sector = html.escape(str(row.get('sector', '-')))
     industry = html.escape(str(row.get('industry', '-')))
     
@@ -1710,7 +1702,7 @@ body::before{{
         </div>
         <div class="modal-section">
             <h3>Call/Float</h3>
-            <p>Total call volume in scanned expiries × 100 ÷ float shares. This is a share-equivalent pressure proxy, not delta-adjusted. ≥2% is notable, ≥5% high, ≥10% extreme.</p>
+            <p>Displayed gamma contract volume × 100 ÷ float shares. This explains how large the shown contract is relative to float; it is not an independent signal and is not delta-adjusted. ≥2% is notable, ≥5% high, ≥10% extreme.</p>
         </div>
         <button class="modal-close" onclick="closeInfo()">Got it ✓</button>
     </div>
