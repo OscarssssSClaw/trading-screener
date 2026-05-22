@@ -3,6 +3,7 @@
 
 import time
 import datetime
+import math
 import yfinance as yf
 from tradingview_screener import Query, Column
 import pandas as pd
@@ -21,6 +22,9 @@ GAMMA_MIN_PREMIUM = 250_000
 GAMMA_MAX_DTE = 30
 GAMMA_MAX_EXPIRIES = 4
 GAMMA_HISTORY_PATH = Path("data/gamma_contract_history.json")
+GAMMA_WALL_MIN_OI = 20
+GAMMA_WALL_MIN_SCORE = 35
+GAMMA_WALL_MAX_DIST_PCT = 20
 
 
 
@@ -143,6 +147,136 @@ def safe_float(value, default=0.0):
         return default
 
 
+def bs_gamma(spot, strike, years_to_expiry, iv):
+    if spot <= 0 or strike <= 0 or years_to_expiry <= 0 or iv <= 0:
+        return 0.0
+    try:
+        d1 = (math.log(spot / strike) + (0.043 + 0.5 * iv * iv) * years_to_expiry) / (iv * math.sqrt(years_to_expiry))
+        return math.exp(-0.5 * d1 * d1) / math.sqrt(2 * math.pi) / (spot * iv * math.sqrt(years_to_expiry))
+    except Exception:
+        return 0.0
+
+
+def gamma_wall_score_class(score):
+    if score >= 80:
+        return "strong"
+    if score >= 55:
+        return "med"
+    if score > 0:
+        return "low"
+    return "none"
+
+
+def summarize_gamma_walls(option_rows, stock_price):
+    if not option_rows or stock_price <= 0:
+        return {}
+
+    by_strike = {}
+    total_net = 0.0
+    basis_counts = {}
+    for row in option_rows:
+        basis_counts[row.get('basis', 'OI')] = basis_counts.get(row.get('basis', 'OI'), 0) + 1
+        strike = row['strike']
+        level = by_strike.setdefault(strike, {
+            'strike': strike,
+            'abs_gex': 0.0,
+            'net_gex': 0.0,
+            'call_gex': 0.0,
+            'put_gex': 0.0,
+            'min_dte': row['dte'],
+            'expiry': row['expiry'],
+        })
+        abs_gex = abs(row['gex'])
+        level['abs_gex'] += abs_gex
+        level['net_gex'] += row['gex']
+        total_net += row['gex']
+        if row['type'] == 'CALL':
+            level['call_gex'] += abs_gex
+        else:
+            level['put_gex'] += abs_gex
+        if row['dte'] < level['min_dte']:
+            level['min_dte'] = row['dte']
+            level['expiry'] = row['expiry']
+
+    levels = list(by_strike.values())
+    if not levels:
+        return {}
+
+    max_abs = max(level['abs_gex'] for level in levels)
+    if max_abs <= 0:
+        return {}
+
+    for level in levels:
+        level['score'] = int(round(min(100, level['abs_gex'] / max_abs * 100)))
+        level['dist_pct'] = (level['strike'] / stock_price - 1) * 100
+        level['distance'] = level['strike'] - stock_price
+        level['abs_gex_mn'] = round(level['abs_gex'] / 1_000_000, 2)
+        level['net_gex_mn'] = round(level['net_gex'] / 1_000_000, 2)
+        level['role'] = 'call wall' if level['call_gex'] >= level['put_gex'] else 'put wall'
+
+    def clean(level):
+        if not level:
+            return None
+        return {
+            'strike': round(level['strike'], 2),
+            'score': level['score'],
+            'dist_pct': round(level['dist_pct'], 1),
+            'abs_gex_mn': level['abs_gex_mn'],
+            'net_gex_mn': level['net_gex_mn'],
+            'dte': int(level['min_dte']),
+            'expiry': level['expiry'],
+            'role': level['role'],
+        }
+
+    nearby = [l for l in levels if abs(l['dist_pct']) <= GAMMA_WALL_MAX_DIST_PCT]
+    significant = [l for l in nearby if l['score'] >= GAMMA_WALL_MIN_SCORE]
+    upper_pool = [l for l in significant if l['strike'] > stock_price]
+    lower_pool = [l for l in significant if l['strike'] < stock_price]
+    if not upper_pool:
+        upper_pool = [l for l in nearby if l['strike'] > stock_price and l['score'] >= 10]
+    if not lower_pool:
+        lower_pool = [l for l in nearby if l['strike'] < stock_price and l['score'] >= 10]
+
+    upper = min(upper_pool, key=lambda l: (abs(l['dist_pct']), -l['score'])) if upper_pool else None
+    lower = min(lower_pool, key=lambda l: (abs(l['dist_pct']), -l['score'])) if lower_pool else None
+    pin_pool = [l for l in significant if abs(l['dist_pct']) <= 2.0]
+    pin = max(pin_pool, key=lambda l: (l['score'], -abs(l['dist_pct']))) if pin_pool else None
+
+    zero_gamma = None
+    grid = [stock_price * (0.82 + i * (0.36 / 72)) for i in range(73)]
+    profile = []
+    for px in grid:
+        total = 0.0
+        for row in option_rows:
+            years = max(row['dte'] / 365, 0.25 / 365)
+            gamma = bs_gamma(px, row['strike'], years, row['iv'])
+            sign = 1 if row['type'] == 'CALL' else -1
+            total += sign * gamma * row['oi'] * 100 * px * px * 0.01
+        profile.append(total)
+    for i in range(1, len(grid)):
+        prev, cur = profile[i - 1], profile[i]
+        if prev == 0 or cur == 0 or (prev < 0 < cur) or (prev > 0 > cur):
+            x0, x1 = grid[i - 1], grid[i]
+            y0, y1 = prev, cur
+            zero_gamma = x0 - y0 * (x1 - x0) / (y1 - y0) if y1 != y0 else x0
+            break
+
+    max_strength = max([l['score'] for l in [upper, lower, pin] if l] or [0])
+    basis = 'MIXED'
+    if len(basis_counts) == 1:
+        basis = next(iter(basis_counts.keys()))
+    return {
+        'upper': clean(upper),
+        'lower': clean(lower),
+        'pin': clean(pin),
+        'zero_gamma': round(zero_gamma, 2) if zero_gamma else None,
+        'net_gex_mn': round(total_net / 1_000_000, 2),
+        'max_strength': int(max_strength),
+        'basis': basis,
+        'sign_convention': 'positive GEX assumes dealer long gamma; negative GEX assumes dealer short gamma',
+    }
+
+
 def fmt_money(value):
     try:
         value = float(value)
@@ -240,6 +374,7 @@ def get_gamma_squeeze_for_ticker(ticker, stock_price, price_rows=None, history=N
 
     today = pd.Timestamp.utcnow().normalize().tz_localize(None)
     candidates = []
+    option_rows = []
     for exp in expiries:
         try:
             dte = int((pd.Timestamp(exp) - today).days)
@@ -248,9 +383,43 @@ def get_gamma_squeeze_for_ticker(ticker, stock_price, price_rows=None, history=N
         if dte < 0 or dte > GAMMA_MAX_DTE:
             continue
         try:
-            calls = t.option_chain(exp).calls
+            chain = t.option_chain(exp)
+            calls = chain.calls
+            puts = chain.puts
         except Exception:
             continue
+
+        for opt_type, options_df, sign in [('CALL', calls, 1), ('PUT', puts, -1)]:
+            if options_df is None or options_df.empty:
+                continue
+            for _, option_row in options_df.iterrows():
+                strike = safe_float(option_row.get('strike'), 0.0)
+                oi = safe_float(option_row.get('openInterest'), 0.0)
+                volume = safe_float(option_row.get('volume'), 0.0)
+                iv = safe_float(option_row.get('impliedVolatility'), 0.0)
+                exposure_contracts = oi
+                basis = 'OI'
+                if exposure_contracts < GAMMA_WALL_MIN_OI and oi <= 0 and volume >= GAMMA_WALL_MIN_OI:
+                    exposure_contracts = volume
+                    basis = 'VOL'
+                if strike <= 0 or exposure_contracts < GAMMA_WALL_MIN_OI or iv <= 0:
+                    continue
+                years = max(dte / 365, 0.25 / 365)
+                unit_gamma = bs_gamma(stock_price, strike, years, iv)
+                gex = sign * unit_gamma * exposure_contracts * 100 * stock_price * stock_price * 0.01
+                if gex == 0:
+                    continue
+                option_rows.append({
+                    'type': opt_type,
+                    'strike': strike,
+                    'oi': exposure_contracts,
+                    'iv': iv,
+                    'dte': dte,
+                    'expiry': exp,
+                    'gex': gex,
+                    'basis': basis,
+                })
+
         if calls is None or calls.empty:
             continue
         for _, row in calls.iterrows():
@@ -295,7 +464,10 @@ def get_gamma_squeeze_for_ticker(ticker, stock_price, price_rows=None, history=N
             candidate = verify_contract(symbol, candidate, history)
             candidates.append(candidate)
 
+    gamma_map = summarize_gamma_walls(option_rows, stock_price)
+
     if not candidates:
+        empty['map'] = gamma_map
         return empty
 
     candidates = sorted(candidates, key=lambda c: (c['premium'], c['score']), reverse=True)[:12]
@@ -314,6 +486,7 @@ def get_gamma_squeeze_for_ticker(ticker, stock_price, price_rows=None, history=N
         'contract_call_volume': int(primary.get('volume') or 0),
         'call_share_equiv': int(primary.get('call_share_equiv') or ((primary.get('volume') or 0) * 100)),
         'contracts': candidates,
+        'map': gamma_map,
     }
 
 
@@ -435,6 +608,51 @@ def fmt_date_from_epoch(value):
         return datetime.datetime.fromtimestamp(value, datetime.timezone.utc).strftime('%Y-%m-%d')
     except Exception:
         return '-'
+
+
+def gamma_wall_line(label, wall, adr):
+    if not wall:
+        return f'<div class="gamma-wall-row gamma-wall-empty"><span>{label}</span><strong>-</strong><em>-</em></div>'
+    score = int(wall.get('score') or 0)
+    score_class = gamma_wall_score_class(score)
+    dist_pct = safe_float(wall.get('dist_pct'), 0.0)
+    adr_mult = abs(dist_pct) / adr if adr and adr > 0 else None
+    adr_text = f"{adr_mult:.1f} ADR" if adr_mult is not None else "ADR -"
+    role = html.escape(str(wall.get('role') or 'wall'))
+    expiry = html.escape(str(wall.get('expiry') or '-'))
+    title = html.escape(
+        f"{label}: {wall.get('strike')} | strength {score}/100 | {dist_pct:+.1f}% | "
+        f"{adr_text} | {role} | {wall.get('abs_gex_mn')}M abs GEX | {expiry}",
+        quote=True,
+    )
+    return (
+        f'<div class="gamma-wall-row" title="{title}">'
+        f'<span>{label}</span>'
+        f'<strong>{safe_float(wall.get("strike"), 0):g}</strong>'
+        f'<em>{dist_pct:+.1f}% / {adr_text}</em>'
+        f'<b class="gamma-wall-score gamma-wall-{score_class}">{score}</b>'
+        f'</div>'
+    )
+
+
+def render_gamma_wall_card(gamma_map, adr):
+    if not gamma_map or not gamma_map.get('max_strength'):
+        return ''
+    zero = gamma_map.get('zero_gamma')
+    zero_text = f"ZG {safe_float(zero, 0):g}" if zero else "ZG -"
+    net = safe_float(gamma_map.get('net_gex_mn'), 0.0)
+    basis = html.escape(str(gamma_map.get('basis') or 'OI'))
+    convention = html.escape(str(gamma_map.get('sign_convention') or ''), quote=True)
+    return f"""<div class="gamma-wall-card" title="{convention}">
+        <div class="gamma-wall-head">
+            <span>Gamma Wall</span>
+            <strong>{int(gamma_map.get('max_strength') or 0)}</strong>
+        </div>
+        {gamma_wall_line('PIN', gamma_map.get('pin'), adr)}
+        {gamma_wall_line('UP', gamma_map.get('upper'), adr)}
+        {gamma_wall_line('DN', gamma_map.get('lower'), adr)}
+        <div class="gamma-wall-foot">{zero_text} · Net {net:+.1f}M · Basis {basis}</div>
+    </div>"""
 
 
 
@@ -704,20 +922,25 @@ for i, row in enumerate(all_stocks.itertuples()):
     ticker = getattr(row, 'ticker')
     close = safe_float(getattr(row, 'close', 0), 0.0)
     gamma = get_gamma_squeeze_for_ticker(ticker, close, price_data.get(ticker, []), gamma_history)
-    if gamma and gamma.get('score', 0) > 0:
+    if gamma and (gamma.get('score', 0) > 0 or (gamma.get('map') or {}).get('max_strength', 0) > 0):
         gamma_data[ticker] = gamma
     if (i + 1) % 10 == 0:
         print(f"  Gamma: {i+1}/{len(all_stocks)} stocks...")
     time.sleep(0.25)
 gamma_count = sum(1 for g in gamma_data.values() if g.get('score', 0) >= 60)
-if gamma_data:
+gamma_wall_count = sum(1 for g in gamma_data.values() if (g.get('map') or {}).get('max_strength', 0) >= 60)
+has_live_gamma_contracts = any((g.get('contracts') or []) for g in gamma_data.values())
+if has_live_gamma_contracts:
     save_gamma_history(gamma_data)
     print(f"Saved gamma history: {GAMMA_HISTORY_PATH}")
+elif gamma_data:
+    print("No live gamma contracts; preserving saved gamma contract history")
 else:
     gamma_data = gamma_data_from_history(gamma_history)
     gamma_count = sum(1 for g in gamma_data.values() if g.get('score', 0) >= 60)
+    gamma_wall_count = sum(1 for g in gamma_data.values() if (g.get('map') or {}).get('max_strength', 0) >= 60)
     print("WARNING: no live gamma candidates; using saved gamma history fallback")
-print(f"Got gamma candidates for {len(gamma_data)} stocks ({gamma_count} score >= 60)")
+print(f"Got gamma candidates for {len(gamma_data)} stocks ({gamma_count} GS >= 60, {gamma_wall_count} wall strength >= 60)")
 
 print("Fetching short interest data...")
 short_data = {}
@@ -765,6 +988,24 @@ def make_row(row, price_data, anim_delay=0):
     primary_contract = gamma_contracts[0] if gamma_contracts else {}
     gamma_title = html.escape(str(gamma.get('display', '-')) + (" | " + str(gamma.get('tags', '')) if gamma.get('tags') else ""), quote=True)
     gamma_json = html.escape(json.dumps(gamma_contracts), quote=False)
+    gamma_map = gamma.get('map') or {}
+    gamma_wall_score_val = int(gamma_map.get('max_strength', 0) or 0)
+    gamma_wall_class = gamma_wall_score_class(gamma_wall_score_val)
+    gamma_wall_display = str(gamma_wall_score_val) if gamma_wall_score_val > 0 else "-"
+    gamma_wall_parts = []
+    for wall_label, wall_key in (('PIN', 'pin'), ('UP', 'upper'), ('DN', 'lower')):
+        wall = gamma_map.get(wall_key) or {}
+        if wall:
+            gamma_wall_parts.append(
+                f"{wall_label} {safe_float(wall.get('strike'), 0):g} "
+                f"({safe_float(wall.get('dist_pct'), 0):+.1f}%, score {int(wall.get('score') or 0)})"
+            )
+    if gamma_map:
+        zero = gamma_map.get('zero_gamma')
+        zero_part = f"ZG {safe_float(zero, 0):g}" if zero else "ZG -"
+        gamma_wall_parts.append(f"{zero_part} | Basis {gamma_map.get('basis') or 'OI'}")
+    gamma_wall_title = html.escape(" | ".join(gamma_wall_parts) if gamma_wall_parts else "No gamma wall", quote=True)
+    gamma_wall_card = render_gamma_wall_card(gamma_map, adr)
     if primary_contract:
         verify_text = str(primary_contract.get('verification', 'Pending'))
         verify_class = html.escape(verify_text.lower().split()[0])
@@ -836,13 +1077,18 @@ def make_row(row, price_data, anim_delay=0):
         badges.append(f'<span class="strategy-badge strategy-callfloat">CF {call_float_pct:.1f}%</span>')
         classes.append('strategy-callfloat')
         strat_list.append('CallFloat')
+    if gamma_wall_score_val >= 60:
+        badges.append(f'<span class="strategy-badge strategy-gammawall">GW {gamma_wall_score_val}</span>')
+        classes.append('strategy-gammawall')
+        strat_list.append('GammaWall')
     
     badges_str = ''.join(badges)
     classes_str = ' '.join(classes)
     data_strategies = ','.join(strat_list)
+    optional_cards = "\n".join(card for card in (gamma_card, gamma_wall_card) if card)
     
     return f'''
-    <div class="stock-row {classes_str}" data-strategies="{data_strategies}" data-rs="{rs:.1f}" data-iv="{iv_attr}" data-gamma="{gamma_score_val}" data-short="{short_float if short_float is not None else 0}" data-callfloat="{call_float_pct if call_float_pct is not None else 0}" data-price="{close}" data-dist="{dist_high:.1f}">
+    <div class="stock-row {classes_str}" data-strategies="{data_strategies}" data-rs="{rs:.1f}" data-iv="{iv_attr}" data-gamma="{gamma_score_val}" data-wall="{gamma_wall_score_val}" data-short="{short_float if short_float is not None else 0}" data-callfloat="{call_float_pct if call_float_pct is not None else 0}" data-price="{close}" data-dist="{dist_high:.1f}">
         <div class="stock-header">
             <div class="stock-name">{name}</div>
             <div class="stock-ticker">{ticker_display} {badges_str}</div>
@@ -852,8 +1098,9 @@ def make_row(row, price_data, anim_delay=0):
             <div class="stock-price">${close:.2f}</div>
             <div class="metric iv-metric">IV<br><span class="iv-value iv-{iv_class}">{iv_display}</span></div>
             <div class="metric gamma-metric" title="{gamma_title}">GS<br><span class="gamma-value gamma-{gamma_class}">{gamma_display}</span></div>
+            <div class="metric wall-metric" title="{gamma_wall_title}">GW<br><span class="gamma-wall-value gamma-wall-{gamma_wall_class}">{gamma_wall_display}</span></div>
         </div>
-        {gamma_card}
+{optional_cards}
         <div class="secondary-metrics">
             <div class="metric">Dist<br><span class="{dist_color}">{dist_high:.1f}%</span></div>
             <div class="metric">6M<br><span class="{perf_color}">{perf_6m:.1f}%</span></div>
@@ -1047,9 +1294,10 @@ body::before{{
     margin-bottom:12px;
     gap:16px;
     align-items:center;
+    flex-wrap:wrap;
     transition:all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     position:relative;
-    overflow:hidden;
+    overflow:visible;
 }}
 
 .stock-row.visible{{
@@ -1091,12 +1339,19 @@ body::before{{
     display:flex;
     align-items:center;
     gap:14px;
+    flex:0 0 auto;
 }}
 
 .secondary-metrics{{
     display:flex;
     align-items:center;
     gap:14px;
+    flex:0 0 auto;
+}}
+
+.stock-header{{
+    flex:1 1 170px;
+    min-width:160px;
 }}
 
 .stock-info{{
@@ -1182,10 +1437,11 @@ body::before{{
 .strategy-badge.strategy-qullamaggie{{background:var(--red)}}
 .strategy-badge.strategy-htf{{background:var(--accent);color:#000}}
 .strategy-badge.strategy-gamma{{background:var(--purple);color:#fff}}
+.strategy-badge.strategy-gammawall{{background:#22c55e;color:#001307}}
 .strategy-badge.strategy-short{{background:#f59e0b;color:#000}}
 .strategy-badge.strategy-callfloat{{background:#14b8a6;color:#001311}}
 
-.gamma-value{{
+.gamma-value,.gamma-wall-value{{
     font-size:15px;
     font-weight:700;
     padding:4px 10px;
@@ -1340,6 +1596,78 @@ body::before{{
     margin-top:2px;
 }}
 
+.gamma-wall-card{{
+    width:260px;
+    min-width:240px;
+    background:linear-gradient(135deg, rgba(34,197,94,0.13), rgba(168,85,247,0.08));
+    border:1px solid rgba(34,197,94,0.45);
+    border-radius:12px;
+    padding:10px 12px;
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+}}
+.gamma-wall-head{{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    font-size:9px;
+    text-transform:uppercase;
+    letter-spacing:1px;
+    color:#bbf7d0;
+    font-weight:900;
+}}
+.gamma-wall-head strong{{
+    background:#22c55e;
+    color:#001307;
+    border-radius:999px;
+    padding:2px 7px;
+    font-size:11px;
+}}
+.gamma-wall-row{{
+    display:grid;
+    grid-template-columns:32px 58px 1fr 34px;
+    gap:6px;
+    align-items:center;
+    font-size:11px;
+    color:#d8dce6;
+}}
+.gamma-wall-row span{{
+    color:var(--text-muted);
+    font-size:9px;
+    font-weight:900;
+    letter-spacing:0.7px;
+}}
+.gamma-wall-row strong{{
+    color:#fff;
+    font-size:14px;
+    font-weight:900;
+}}
+.gamma-wall-row em{{
+    font-style:normal;
+    color:var(--text-secondary);
+    white-space:nowrap;
+}}
+.gamma-wall-score{{
+    text-align:center;
+    border-radius:999px;
+    padding:2px 6px;
+    font-size:10px;
+    font-weight:900;
+}}
+.gamma-wall-strong{{background:#22c55e;color:#001307}}
+.gamma-wall-med{{background:rgba(34,197,94,0.18);color:#86efac;border:1px solid rgba(34,197,94,0.35)}}
+.gamma-wall-low{{background:rgba(255,255,255,0.08);color:var(--text-secondary)}}
+.gamma-wall-none{{color:var(--text-muted)}}
+.gamma-wall-empty strong,.gamma-wall-empty em{{color:var(--text-muted)}}
+.gamma-wall-foot{{
+    font-size:10px;
+    color:var(--text-muted);
+    font-weight:800;
+    border-top:1px solid rgba(255,255,255,0.08);
+    padding-top:5px;
+}}
+
 .chart-cell{{
     flex:1;
     min-width:140px;
@@ -1347,6 +1675,10 @@ body::before{{
     border-radius:6px;
     overflow:hidden;
     border:1px solid var(--border);
+    touch-action:pan-y;
+}}
+.chart-cell canvas{{
+    pointer-events:none;
 }}
 
 /* Modal */
@@ -1532,7 +1864,7 @@ body::before{{
     .mobile-primary-metrics{{
         width:100%;
         display:grid;
-        grid-template-columns:1fr 74px 74px;
+        grid-template-columns:1fr 68px 68px 68px;
         gap:8px;
         align-items:stretch;
         order:2;
@@ -1548,16 +1880,16 @@ body::before{{
         border:1px solid var(--border);
         border-radius:12px;
     }}
-    .iv-metric,.gamma-metric{{
+    .iv-metric,.gamma-metric,.wall-metric{{
         min-width:0;
         padding:7px 6px;
         background:rgba(255,255,255,0.035);
         border:1px solid var(--border);
         border-radius:12px;
     }}
-    .iv-value,.gamma-value{{
+    .iv-value,.gamma-value,.gamma-wall-value{{
         font-size:13px;
-        padding:3px 8px;
+        padding:3px 7px;
         margin-top:2px;
     }}
 
@@ -1604,8 +1936,21 @@ body::before{{
     .gamma-card-time{{font-size:11px}}
     .gamma-card-verify{{font-size:11px}}
 
-    .chart-cell{{
+    .gamma-wall-card{{
         order:5;
+        width:100%;
+        min-width:0;
+        padding:12px;
+        border-radius:14px;
+    }}
+    .gamma-wall-row{{
+        grid-template-columns:34px 64px 1fr 38px;
+        font-size:12px;
+    }}
+    .gamma-wall-row strong{{font-size:15px}}
+
+    .chart-cell{{
+        order:6;
         flex:1 1 100%;
         width:100%;
         min-width:0;
@@ -1647,6 +1992,7 @@ body::before{{
         <option value="Qullamaggie">Qullamaggie ({ql_count})</option>
         <option value="HTF">HTF ({htf_count})</option>
         <option value="Gamma">Gamma Squeeze ({gamma_count})</option>
+        <option value="GammaWall">Gamma Wall ({gamma_wall_count})</option>
         <option value="ShortFuel">Short Fuel ({short_fuel_count})</option>
         <option value="CallFloat">Call/Float</option>
     </select>
@@ -1656,6 +2002,7 @@ body::before{{
         <option value="iv-desc">IV ↓ (High to Low)</option>
         <option value="iv-asc">IV ↑ (Low to High)</option>
         <option value="gamma-desc">GS ↓ (Gamma Score)</option>
+        <option value="wall-desc">GW ↓ (Wall Strength)</option>
         <option value="short-desc">Short Float ↓</option>
         <option value="callfloat-desc">Call/Float ↓</option>
         <option value="price-desc">Price ↓</option>
@@ -1697,6 +2044,10 @@ body::before{{
             <p>Short-dated CALL Vol/OI spike with near/OTM strike, estimated premium, and stock momentum context.<br>First Seen is scanner detection time; Last Trade is yfinance contract lastTradeDate. yfinance cannot confirm buy-at-ask, sweeps, BTO/STO, or whale intent — use UW/flow data to confirm.</p>
         </div>
         <div class="modal-section">
+            <h3>Gamma Wall</h3>
+            <p>Nearest major upper/lower high-gamma strike and current pin candidate from 30DTE option chains. Wall strength is 0-100 within each stock, where 100 is that stock's largest abs-GEX strike. Basis OI uses open interest; Basis VOL is an intraday volume-gamma fallback when yfinance returns zero OI. Zero gamma is a regime boundary, not a magnet. yfinance data is a proxy and does not reveal true dealer inventory.</p>
+        </div>
+        <div class="modal-section">
             <h3>Short Fuel</h3>
             <p>Short Float % and days-to-cover from yfinance. High fuel = Short Float ≥ 10% or DTC ≥ 3; Very High = Short Float ≥ 20% or DTC ≥ 5.<br>Data can be delayed/stale, so treat it as squeeze context, not a real-time covering signal.</p>
         </div>
@@ -1727,9 +2078,17 @@ function createChart(container, data) {{
         height: 60,
         layout: {{ background: {{ type: 'solid', color: '#1e222d' }}, textColor: '#d1d4dc' }},
         grid: {{ vertLines: {{ color: '#2a2e39' }}, horzLines: {{ color: '#2a2e39' }} }},
-        timeScale: {{ visible: false }},
+        timeScale: {{ visible: false, fixLeftEdge: true, fixRightEdge: true, lockVisibleTimeRangeOnResize: true }},
         rightPriceScale: {{ visible: false }},
-        crosshair: {{ mode: 0 }}
+        handleScroll: false,
+        handleScale: false,
+        kineticScroll: {{ touch: false, mouse: false }},
+        trackingMode: {{ exitMode: 1 }},
+        crosshair: {{
+            mode: 2,
+            vertLine: {{ visible: false, labelVisible: false }},
+            horzLine: {{ visible: false, labelVisible: false }}
+        }}
     }});
     var candleSeries = chart.addCandlestickSeries({{
         upColor: '#26a69a', downColor: '#ef5350',
@@ -1802,6 +2161,8 @@ function showAllRows() {{
             return parseFloat(a.getAttribute('data-iv') || 0) - parseFloat(b.getAttribute('data-iv') || 0);
         }} else if (currentSort === 'gamma-desc') {{
             return parseFloat(b.getAttribute('data-gamma') || 0) - parseFloat(a.getAttribute('data-gamma') || 0);
+        }} else if (currentSort === 'wall-desc') {{
+            return parseFloat(b.getAttribute('data-wall') || 0) - parseFloat(a.getAttribute('data-wall') || 0);
         }} else if (currentSort === 'short-desc') {{
             return parseFloat(b.getAttribute('data-short') || 0) - parseFloat(a.getAttribute('data-short') || 0);
         }} else if (currentSort === 'callfloat-desc') {{
