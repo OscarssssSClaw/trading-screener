@@ -23,7 +23,7 @@
       "tags": "CALL, 0-7DTE, near/OTM, Vol/OI>=5, Prem>$500K, Above MA",
       "ticker": "NASDAQ:ALAB",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 5.54,
       "volume": 826
     },
@@ -50,7 +50,7 @@
       "tags": "CALL, 0-7DTE, near/OTM, Vol/OI>=10, Prem>$1M, Above MA",
       "ticker": "NASDAQ:AMD",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 16.46,
       "volume": 12826
     },
@@ -77,7 +77,7 @@
       "tags": "CALL, 0-7DTE, near/OTM, Vol/OI>=10, Prem>$1M, Above MA",
       "ticker": "NASDAQ:AMD",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 36.86,
       "volume": 4607
     },
@@ -104,7 +104,7 @@
       "tags": "CALL, 0-7DTE, near/OTM, Vol/OI>=5, Prem>$500K, Above MA",
       "ticker": "NASDAQ:AMD",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 7.51,
       "volume": 1051
     },
@@ -131,7 +131,7 @@
       "tags": "CALL, 0-7DTE, near/OTM, Vol/OI>=5, Prem>$1M, Above MA",
       "ticker": "NASDAQ:AMD",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 5.3,
       "volume": 5139
     },
@@ -158,7 +158,7 @@
       "tags": "CALL, 0-7DTE, near/OTM, Vol/OI>=10, Prem>$1M, Above MA",
       "ticker": "NASDAQ:AMD",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 18.49,
       "volume": 3605
     },
@@ -185,7 +185,7 @@
       "tags": "CALL, 0-7DTE, far-OTM, Vol/OI>=10, Prem>$500K, Above MA",
       "ticker": "NASDAQ:AMD",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 10.42,
       "volume": 1522
     },
@@ -212,7 +212,7 @@
       "tags": "CALL, 0-7DTE, far-OTM, Vol/OI>=5, Prem>$1M, Above MA",
       "ticker": "NASDAQ:AMD",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 5.9,
       "volume": 3895
     },
@@ -239,7 +239,7 @@
       "tags": "CALL, 0-7DTE, far-OTM, Vol/OI>=5, Prem>$500K, Above MA",
       "ticker": "NASDAQ:AMD",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 8.87,
       "volume": 2891
     },
@@ -266,7 +266,7 @@
       "tags": "CALL, 0-7DTE, far-OTM, Vol/OI>=5, Prem>$250K, Above MA",
       "ticker": "NASDAQ:AMD",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 5.12,
       "volume": 1459
     },
@@ -293,7 +293,7 @@
       "tags": "CALL, 0-7DTE, near/OTM, Vol/OI>=5, Prem>$1M, Above MA",
       "ticker": "NASDAQ:ARM",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 6.72,
       "volume": 1243
     },
@@ -320,7 +320,7 @@
       "tags": "CALL, 0-7DTE, near/OTM, Vol/OI>=5, Prem>$250K, Near high, Above MA",
       "ticker": "NASDAQ:ASTS",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 8.46,
       "volume": 854
     },
@@ -347,7 +347,7 @@
       "tags": "CALL, 0-7DTE, near/OTM, Vol/OI>=10, Prem>$500K, Near high, Above MA",
       "ticker": "NASDAQ:ASTS",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 10.64,
       "volume": 1117
     },
@@ -374,7 +374,7 @@
       "tags": "CALL, 0-7DTE, near/OTM, Vol/OI>=5, Prem>$500K, Near high, Above MA",
       "ticker": "NASDAQ:ASTS",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 7.49,
       "volume": 1191
     },
@@ -401,7 +401,7 @@
       "tags": "CALL, 0-7DTE, far-OTM, Vol/OI>=10, Prem>$1M, Near high, Above MA",
       "ticker": "NASDAQ:ASTS",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 11.93,
       "volume": 19808
     },
@@ -428,7 +428,7 @@
       "tags": "CALL, 0-7DTE, far-OTM, Vol/OI>=10, Prem>$250K, Near high, Above MA",
       "ticker": "NASDAQ:ASTS",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 14.06,
       "volume": 2277
     },
@@ -455,7 +455,7 @@
       "tags": "CALL, 0-7DTE, far-OTM, Vol/OI>=10, Prem>$250K, Near high, Above MA",
       "ticker": "NASDAQ:ASTS",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 14.88,
       "volume": 2782
     },
@@ -482,7 +482,7 @@
       "tags": "CALL, 15-30DTE, near/OTM, Vol/OI>=10, Prem>$1M, Near high, Above MA",
       "ticker": "NASDAQ:ASTS",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 84.56,
       "volume": 15474
     },
@@ -509,7 +509,7 @@
       "tags": "CALL, 15-30DTE, far-OTM, Vol/OI>=10, Prem>$1M, Near high, Above MA",
       "ticker": "NASDAQ:ASTS",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 10.13,
       "volume": 16778
     },
@@ -536,7 +536,7 @@
       "tags": "CALL, 15-30DTE, Vol/OI>=5, Prem>$500K",
       "ticker": "NYSE:CAT",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 5.54,
       "volume": 5138
     },
@@ -563,7 +563,7 @@
       "tags": "CALL, 0-7DTE, near/OTM, Vol/OI>=5, Prem>$500K, Above MA",
       "ticker": "NASDAQ:CIFR",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 6.13,
       "volume": 9111
     },
@@ -590,7 +590,7 @@
       "tags": "CALL, 0-7DTE, near/OTM, Vol/OI>=5, Prem>$500K, Near high, Above MA",
       "ticker": "NASDAQ:CSCO",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 5.06,
       "volume": 2430
     },
@@ -617,7 +617,7 @@
       "tags": "CALL, 0-7DTE, near/OTM, Vol/OI>=5, Prem>$250K, Near high, Above MA",
       "ticker": "NASDAQ:CSCO",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 5.82,
       "volume": 2079
     },
@@ -644,7 +644,7 @@
       "tags": "CALL, 0-7DTE, far-OTM, Vol/OI>=5, Prem>$250K, Near high, Above MA",
       "ticker": "NYSE:DELL",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 8.96,
       "volume": 1022
     },
@@ -671,7 +671,7 @@
       "tags": "CALL, 15-30DTE, near/OTM, Vol/OI>=5, Prem>$1M, Above MA",
       "ticker": "NASDAQ:FTAI",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 9.4,
       "volume": 1391
     },
@@ -698,7 +698,7 @@
       "tags": "CALL, 0-7DTE, near/OTM, Vol/OI>=5, Prem>$500K, Above MA",
       "ticker": "NASDAQ:INTC",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 8.67,
       "volume": 5046
     },
@@ -725,7 +725,7 @@
       "tags": "CALL, 0-7DTE, near/OTM, Vol/OI>=5, Prem>$1M, Near high, Above MA",
       "ticker": "NASDAQ:MRVL",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 8.24,
       "volume": 3997
     },
@@ -752,7 +752,7 @@
       "tags": "CALL, 0-7DTE, near/OTM, Vol/OI>=5, Prem>$1M, Above MA",
       "ticker": "NASDAQ:MU",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 9.75,
       "volume": 3830
     },
@@ -779,7 +779,7 @@
       "tags": "CALL, 0-7DTE, near/OTM, Vol/OI>=5, Prem>$1M, Above MA",
       "ticker": "NASDAQ:MU",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 9.7,
       "volume": 7141
     },
@@ -806,7 +806,7 @@
       "tags": "CALL, 0-7DTE, near/OTM, Vol/OI>=5, Prem>$1M, Above MA",
       "ticker": "NASDAQ:MU",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 9.08,
       "volume": 3812
     },
@@ -833,7 +833,7 @@
       "tags": "CALL, 0-7DTE, near/OTM, Vol/OI>=5, Prem>$1M, Above MA",
       "ticker": "NASDAQ:MU",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 6.39,
       "volume": 1610
     },
@@ -860,7 +860,7 @@
       "tags": "CALL, 0-7DTE, ITM, Vol/OI>=5, Prem>$1M, Near high, Above MA",
       "ticker": "NASDAQ:NVTS",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 7.73,
       "volume": 2744
     },
@@ -887,7 +887,7 @@
       "tags": "CALL, 0-7DTE, near/OTM, Vol/OI>=5, Prem>$250K, Near high, Above MA",
       "ticker": "NASDAQ:NVTS",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 5.92,
       "volume": 1569
     },
@@ -914,7 +914,7 @@
       "tags": "CALL, 15-30DTE, near/OTM, Vol/OI>=5, Prem>$250K, Near high, Above MA",
       "ticker": "NASDAQ:NVTS",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 5.76,
       "volume": 939
     },
@@ -941,7 +941,7 @@
       "tags": "CALL, 0-7DTE, near/OTM, Vol/OI>=5, Prem>$500K, Above MA",
       "ticker": "NASDAQ:RKLB",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 6.99,
       "volume": 1189
     },
@@ -968,7 +968,7 @@
       "tags": "CALL, 0-7DTE, near/OTM, Vol/OI>=5, Prem>$250K",
       "ticker": "NASDAQ:SATS",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 5.12,
       "volume": 1064
     },
@@ -995,10 +995,10 @@
       "tags": "CALL, 15-30DTE, ITM, Vol/OI>=10, Prem>$1M, Above MA",
       "ticker": "NYSE:TS",
       "type": "CALL",
-      "updated_at": "2026-05-23 14:01 HK",
+      "updated_at": "2026-05-23 14:06 HK",
       "vol_oi": 24.05,
       "volume": 2525
     }
   },
-  "updated_at": "2026-05-23 14:01 HK"
+  "updated_at": "2026-05-23 14:06 HK"
 }
