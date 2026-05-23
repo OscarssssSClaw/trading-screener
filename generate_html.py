@@ -23,8 +23,11 @@ GAMMA_MAX_DTE = 30
 GAMMA_MAX_EXPIRIES = 4
 GAMMA_HISTORY_PATH = Path("data/gamma_contract_history.json")
 GAMMA_WALL_MIN_OI = 20
-GAMMA_WALL_MIN_SCORE = 35
+GAMMA_WALL_MIN_SCORE = 55
 GAMMA_WALL_MAX_DIST_PCT = 20
+GAMMA_WALL_MIN_DIRECTIONAL_DIST_PCT = 2.0
+GAMMA_WALL_SCORE_ADV_BPS = 30
+GAMMA_WALL_ABS_GEX_FALLBACK = 3_000_000
 
 
 
@@ -167,7 +170,19 @@ def gamma_wall_score_class(score):
     return "none"
 
 
-def summarize_gamma_walls(option_rows, stock_price):
+def average_dollar_volume(price_rows, lookback=20):
+    if not price_rows:
+        return None
+    values = []
+    for row in price_rows[-lookback:]:
+        close = safe_float(row.get('close'), 0.0)
+        volume = safe_float(row.get('volume'), 0.0)
+        if close > 0 and volume > 0:
+            values.append(close * volume)
+    return sum(values) / len(values) if values else None
+
+
+def summarize_gamma_walls(option_rows, stock_price, avg_dollar_vol=None):
     if not option_rows or stock_price <= 0:
         return {}
 
@@ -185,6 +200,7 @@ def summarize_gamma_walls(option_rows, stock_price):
             'put_gex': 0.0,
             'min_dte': row['dte'],
             'expiry': row['expiry'],
+            'basis_counts': {},
         })
         abs_gex = abs(row['gex'])
         level['abs_gex'] += abs_gex
@@ -194,6 +210,8 @@ def summarize_gamma_walls(option_rows, stock_price):
             level['call_gex'] += abs_gex
         else:
             level['put_gex'] += abs_gex
+        row_basis = row.get('basis', 'OI')
+        level['basis_counts'][row_basis] = level['basis_counts'].get(row_basis, 0) + 1
         if row['dte'] < level['min_dte']:
             level['min_dte'] = row['dte']
             level['expiry'] = row['expiry']
@@ -206,13 +224,51 @@ def summarize_gamma_walls(option_rows, stock_price):
     if max_abs <= 0:
         return {}
 
+    def level_basis(level):
+        counts = level.get('basis_counts') or {}
+        if not counts:
+            return 'OI'
+        if len(counts) == 1:
+            return next(iter(counts.keys()))
+        return 'MIXED'
+
+    def basis_weight(basis):
+        if basis == 'OI':
+            return 1.0
+        if basis == 'MIXED':
+            return 0.9
+        return 0.72
+
+    def dte_weight(dte):
+        if dte <= 7:
+            return 1.0
+        if dte <= 14:
+            return 0.95
+        return 0.9
+
     for level in levels:
-        level['score'] = int(round(min(100, level['abs_gex'] / max_abs * 100)))
+        basis = level_basis(level)
+        level['relative_score'] = int(round(min(100, level['abs_gex'] / max_abs * 100)))
+        if avg_dollar_vol and avg_dollar_vol > 0:
+            impact_ratio = level['abs_gex'] / avg_dollar_vol
+            impact_bps = impact_ratio * 10_000
+            raw_score = 100 * (1 - math.exp(-impact_bps / GAMMA_WALL_SCORE_ADV_BPS))
+        else:
+            impact_ratio = None
+            impact_bps = None
+            raw_score = 100 * (1 - math.exp(-level['abs_gex'] / GAMMA_WALL_ABS_GEX_FALLBACK))
+        adjusted_score = raw_score * basis_weight(basis) * dte_weight(level['min_dte'])
+        level['score'] = int(round(max(0, min(100, adjusted_score))))
         level['dist_pct'] = (level['strike'] / stock_price - 1) * 100
         level['distance'] = level['strike'] - stock_price
         level['abs_gex_mn'] = round(level['abs_gex'] / 1_000_000, 2)
         level['net_gex_mn'] = round(level['net_gex'] / 1_000_000, 2)
+        level['impact_ratio'] = round(impact_ratio, 2) if impact_ratio is not None else None
+        level['impact_bps'] = round(impact_bps, 1) if impact_bps is not None else None
+        level['basis'] = basis
         level['role'] = 'call wall' if level['call_gex'] >= level['put_gex'] else 'put wall'
+        distance_factor = max(0.35, 1 - min(abs(level['dist_pct']), GAMMA_WALL_MAX_DIST_PCT) / 30)
+        level['rank_score'] = level['score'] * distance_factor
 
     def clean(level):
         if not level:
@@ -223,6 +279,10 @@ def summarize_gamma_walls(option_rows, stock_price):
             'dist_pct': round(level['dist_pct'], 1),
             'abs_gex_mn': level['abs_gex_mn'],
             'net_gex_mn': level['net_gex_mn'],
+            'impact_ratio': level['impact_ratio'],
+            'impact_bps': level['impact_bps'],
+            'relative_score': level['relative_score'],
+            'basis': level['basis'],
             'dte': int(level['min_dte']),
             'expiry': level['expiry'],
             'role': level['role'],
@@ -230,15 +290,11 @@ def summarize_gamma_walls(option_rows, stock_price):
 
     nearby = [l for l in levels if abs(l['dist_pct']) <= GAMMA_WALL_MAX_DIST_PCT]
     significant = [l for l in nearby if l['score'] >= GAMMA_WALL_MIN_SCORE]
-    upper_pool = [l for l in significant if l['strike'] > stock_price]
-    lower_pool = [l for l in significant if l['strike'] < stock_price]
-    if not upper_pool:
-        upper_pool = [l for l in nearby if l['strike'] > stock_price and l['score'] >= 10]
-    if not lower_pool:
-        lower_pool = [l for l in nearby if l['strike'] < stock_price and l['score'] >= 10]
+    upper_pool = [l for l in significant if l['dist_pct'] >= GAMMA_WALL_MIN_DIRECTIONAL_DIST_PCT]
+    lower_pool = [l for l in significant if l['dist_pct'] <= -GAMMA_WALL_MIN_DIRECTIONAL_DIST_PCT]
 
-    upper = min(upper_pool, key=lambda l: (abs(l['dist_pct']), -l['score'])) if upper_pool else None
-    lower = min(lower_pool, key=lambda l: (abs(l['dist_pct']), -l['score'])) if lower_pool else None
+    upper = max(upper_pool, key=lambda l: (l['rank_score'], l['score'], -abs(l['dist_pct']))) if upper_pool else None
+    lower = max(lower_pool, key=lambda l: (l['rank_score'], l['score'], -abs(l['dist_pct']))) if lower_pool else None
     pin_pool = [l for l in significant if abs(l['dist_pct']) <= 2.0]
     pin = max(pin_pool, key=lambda l: (l['score'], -abs(l['dist_pct']))) if pin_pool else None
 
@@ -464,7 +520,7 @@ def get_gamma_squeeze_for_ticker(ticker, stock_price, price_rows=None, history=N
             candidate = verify_contract(symbol, candidate, history)
             candidates.append(candidate)
 
-    gamma_map = summarize_gamma_walls(option_rows, stock_price)
+    gamma_map = summarize_gamma_walls(option_rows, stock_price, average_dollar_volume(price_rows))
 
     if not candidates:
         empty['map'] = gamma_map
@@ -620,9 +676,14 @@ def gamma_wall_line(label, wall, adr):
     adr_text = f"{adr_mult:.1f} ADR" if adr_mult is not None else "ADR -"
     role = html.escape(str(wall.get('role') or 'wall'))
     expiry = html.escape(str(wall.get('expiry') or '-'))
+    basis = html.escape(str(wall.get('basis') or '-'))
+    rel_score = wall.get('relative_score')
+    rel_text = f" | relative {int(rel_score)}/100" if rel_score is not None else ""
+    impact_bps = wall.get('impact_bps')
+    impact_text = f" | {safe_float(impact_bps, 0):.1f} bps ADV" if impact_bps is not None else ""
     title = html.escape(
-        f"{label}: {wall.get('strike')} | strength {score}/100 | {dist_pct:+.1f}% | "
-        f"{adr_text} | {role} | {wall.get('abs_gex_mn')}M abs GEX | {expiry}",
+        f"{label}: {wall.get('strike')} | strength {score}/100{rel_text}{impact_text} | "
+        f"{dist_pct:+.1f}% | {adr_text} | {role} | {wall.get('abs_gex_mn')}M abs GEX | Basis {basis} | {expiry}",
         quote=True,
     )
     return (
@@ -651,7 +712,7 @@ def render_gamma_wall_card(gamma_map, adr):
         {gamma_wall_line('PIN', gamma_map.get('pin'), adr)}
         {gamma_wall_line('UP', gamma_map.get('upper'), adr)}
         {gamma_wall_line('DN', gamma_map.get('lower'), adr)}
-        <div class="gamma-wall-foot">{zero_text} · Net {net:+.1f}M · Basis {basis}</div>
+        <div class="gamma-wall-foot">{zero_text} · Net {net:+.1f}M · Basis {basis} · ADV adj</div>
     </div>"""
 
 
@@ -996,9 +1057,11 @@ def make_row(row, price_data, anim_delay=0):
     for wall_label, wall_key in (('PIN', 'pin'), ('UP', 'upper'), ('DN', 'lower')):
         wall = gamma_map.get(wall_key) or {}
         if wall:
+            impact = wall.get('impact_bps')
+            impact_text = f", {safe_float(impact, 0):.1f} bps ADV" if impact is not None else ""
             gamma_wall_parts.append(
                 f"{wall_label} {safe_float(wall.get('strike'), 0):g} "
-                f"({safe_float(wall.get('dist_pct'), 0):+.1f}%, score {int(wall.get('score') or 0)})"
+                f"({safe_float(wall.get('dist_pct'), 0):+.1f}%, score {int(wall.get('score') or 0)}{impact_text})"
             )
     if gamma_map:
         zero = gamma_map.get('zero_gamma')
@@ -2045,7 +2108,7 @@ body::before{{
         </div>
         <div class="modal-section">
             <h3>Gamma Wall</h3>
-            <p>Nearest major upper/lower high-gamma strike and current pin candidate from 30DTE option chains. Wall strength is 0-100 within each stock, where 100 is that stock's largest abs-GEX strike. Basis OI uses open interest; Basis VOL is an intraday volume-gamma fallback when yfinance returns zero OI. Zero gamma is a regime boundary, not a magnet. yfinance data is a proxy and does not reveal true dealer inventory.</p>
+            <p>Major upper/lower high-gamma strike and current pin candidate from 30DTE option chains. Wall strength is 0-100 using abs-GEX as basis points of the stock's 20D average dollar volume, then adjusted for data basis and expiry. This makes 100 much harder to reach and avoids showing a nearby low-quality strike as a wall. Basis OI uses open interest; Basis VOL is an intraday volume-gamma fallback when yfinance returns zero OI. Zero gamma is a regime boundary, not a magnet. yfinance data is a proxy and does not reveal true dealer inventory.</p>
         </div>
         <div class="modal-section">
             <h3>Short Fuel</h3>
