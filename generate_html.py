@@ -30,6 +30,14 @@ GAMMA_WALL_SCORE_ADV_BPS = 30
 GAMMA_WALL_ABS_GEX_FALLBACK = 3_000_000
 
 
+def yfinance_symbol(ticker):
+    if ':' not in ticker:
+        return None
+    symbol = ticker.split(':')[-1].strip()
+    if not symbol or symbol.startswith('OTC') or '/' in symbol:
+        return None
+    return symbol
+
 
 def contract_key(symbol, contract):
     return f"{symbol}|{contract}"
@@ -405,12 +413,10 @@ def get_gamma_squeeze_for_ticker(ticker, stock_price, price_rows=None, history=N
     or real-time execution side.
     """
     empty = {'score': 0, 'display': '-', 'contract': '', 'tags': '', 'premium': 0, 'vol_oi': 0, 'contracts': []}
-    if ':' not in ticker or not stock_price or stock_price <= 0:
+    symbol = yfinance_symbol(ticker)
+    if not symbol or not stock_price or stock_price <= 0:
         return empty
-    symbol = ticker.split(':')[1]
     history = history or {'contracts': {}}
-    if symbol.startswith('OTC'):
-        return empty
 
     stock_context = {'near_high': False, 'above_ma': False}
     if price_rows and len(price_rows) >= 20:
@@ -618,10 +624,8 @@ def gamma_data_from_history(history):
     return out
 
 def get_iv_for_ticker(ticker):
-    if ':' not in ticker:
-        return None
-    symbol = ticker.split(':')[1]
-    if symbol.startswith('OTC'):
+    symbol = yfinance_symbol(ticker)
+    if not symbol:
         return None
     # Retry logic for rate limiting
     for attempt in range(5):
@@ -746,10 +750,8 @@ def fmt_yfinance_datetime(value):
 
 def get_short_interest_for_ticker(ticker):
     empty = {'short_float_pct': None, 'short_ratio': None, 'shares_short': None, 'shares_short_prior': None, 'shares_short_change': None, 'shares_short_change_pct': None, 'float_shares': None, 'date_short_interest': '-', 'fuel': 'None'}
-    if ':' not in ticker:
-        return empty
-    symbol = ticker.split(':')[1]
-    if symbol.startswith('OTC'):
+    symbol = yfinance_symbol(ticker)
+    if not symbol:
         return empty
     for attempt in range(3):
         try:
@@ -790,10 +792,8 @@ def get_short_interest_for_ticker(ticker):
     return empty
 
 def get_price_and_adr(ticker, days=90):
-    if ':' not in ticker:
-        return None, None
-    symbol = ticker.split(':')[1]
-    if ticker.startswith('OTC'):
+    symbol = yfinance_symbol(ticker)
+    if not symbol:
         return None, None
     try:
         t = yf.Ticker(symbol)
@@ -1018,6 +1018,8 @@ print(f"Got short interest for {len(short_data)} stocks ({short_fuel_count} high
 def make_row(row, price_data, anim_delay=0):
     ticker = str(row['ticker'])
     ticker_display = html.escape(ticker)
+    symbol = ticker.split(':')[-1].upper()
+    symbol_attr = html.escape(symbol, quote=True)
     name = html.escape(str(row['name']))
     close = float(row['close'])
     dist_high = float(row['dist_high'])
@@ -1151,7 +1153,7 @@ def make_row(row, price_data, anim_delay=0):
     optional_cards = "\n".join(card for card in (gamma_card, gamma_wall_card) if card)
     
     return f'''
-    <div class="stock-row {classes_str}" data-strategies="{data_strategies}" data-rs="{rs:.1f}" data-iv="{iv_attr}" data-gamma="{gamma_score_val}" data-wall="{gamma_wall_score_val}" data-short="{short_float if short_float is not None else 0}" data-callfloat="{call_float_pct if call_float_pct is not None else 0}" data-price="{close}" data-dist="{dist_high:.1f}">
+    <div class="stock-row {classes_str}" data-symbol="{symbol_attr}" data-strategies="{data_strategies}" data-rs="{rs:.1f}" data-iv="{iv_attr}" data-gamma="{gamma_score_val}" data-wall="{gamma_wall_score_val}" data-short="{short_float if short_float is not None else 0}" data-callfloat="{call_float_pct if call_float_pct is not None else 0}" data-price="{close}" data-dist="{dist_high:.1f}">
         <div class="stock-header">
             <div class="stock-name">{name}</div>
             <div class="stock-ticker">{ticker_display} {badges_str}</div>
@@ -1340,6 +1342,40 @@ body::before{{
     outline:none;
     border-color:var(--accent);
     box-shadow:0 0 16px var(--accent-dim);
+}}
+
+.filter-input{{
+    background:var(--bg-card);
+    color:var(--text-primary);
+    border:1px solid var(--border);
+    padding:10px 14px;
+    border-radius:6px;
+    font-size:13px;
+    font-weight:500;
+    font-family:inherit;
+    min-width:180px;
+    transition:all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}}
+
+.filter-input::placeholder{{
+    color:var(--text-muted);
+}}
+
+.filter-input:hover{{
+    border-color:var(--accent);
+}}
+
+.filter-input:focus{{
+    outline:none;
+    border-color:var(--accent);
+    box-shadow:0 0 16px var(--accent-dim);
+}}
+
+.result-count{{
+    color:var(--text-muted);
+    font-size:12px;
+    margin-left:auto;
+    white-space:nowrap;
 }}
 
 .content{{padding:20px 24px}}
@@ -1880,6 +1916,18 @@ body::before{{
         font-size:12px;
         border-radius:10px;
     }}
+    .filter-input{{
+        width:100%;
+        min-width:0;
+        padding:10px;
+        font-size:12px;
+        border-radius:10px;
+    }}
+    .result-count{{
+        grid-column:1 / -1;
+        margin-left:0;
+        font-size:11px;
+    }}
 
     .content{{padding:12px}}
 
@@ -2035,6 +2083,7 @@ body::before{{
     }}
     .stock-price{{font-size:19px}}
     .filter-section{{grid-template-columns:1fr}}
+    .result-count{{grid-column:1}}
 }}
 </style>
 </head>
@@ -2048,7 +2097,7 @@ body::before{{
     <button class="info-btn" onclick="showInfo()">ℹ️ Info</button>
 </div>
 <div class="filter-section">
-    <span class="filter-label">Strategy:</span>
+    <span class="filter-label">Filters:</span>
     <select class="filter-select" id="strategyFilter" onchange="filterChanged()">
         <option value="all">All ({len(all_stocks)})</option>
         <option value="VCP">VCP ({vcp_count})</option>
@@ -2072,6 +2121,8 @@ body::before{{
         <option value="price-asc">Price ↑</option>
         <option value="dist-asc">Dist ↑ (Near High)</option>
     </select>
+    <input class="filter-input" id="symbolSearch" type="search" placeholder="Search symbol..." autocomplete="off" spellcheck="false" oninput="filterChanged()">
+    <span class="result-count" id="resultCount">Showing {len(all_stocks)} / {len(all_stocks)}</span>
 </div>
 <div class="col-header">
     <div style="flex:1;min-width:150px">Stock</div>
@@ -2199,15 +2250,40 @@ function sortChanged() {{
     showAllRows();
 }}
 
+function getSymbolQuery() {{
+    var input = document.getElementById('symbolSearch');
+    return input ? input.value.trim().toUpperCase() : '';
+}}
+
+function rowMatchesFilters(row, strategyFilter, symbolQuery) {{
+    var strategies = row.getAttribute('data-strategies') || '';
+    var stratList = strategies.split(',').map(function(s) {{ return s.trim(); }});
+    var matchesStrategy = strategyFilter === 'all' || stratList.indexOf(strategyFilter) !== -1;
+    var symbol = (row.getAttribute('data-symbol') || '').toUpperCase();
+    var matchesSymbol = !symbolQuery || symbol.indexOf(symbolQuery) !== -1;
+    return matchesStrategy && matchesSymbol;
+}}
+
+function updateResultCount(count, total) {{
+    var counter = document.getElementById('resultCount');
+    if (counter) {{
+        counter.textContent = 'Showing ' + count + ' / ' + total;
+    }}
+}}
+
 function showAllRows() {{
     var filter = document.getElementById('strategyFilter').value;
+    var symbolQuery = getSymbolQuery();
     var rows = [];
-    document.querySelectorAll('.stock-row').forEach(function(row) {{
-        var strategies = row.getAttribute('data-strategies') || '';
-        var stratList = strategies.split(',').map(function(s) {{ return s.trim(); }});
-        if (filter === 'all' || stratList.indexOf(filter) !== -1) {{
+    var allRows = document.querySelectorAll('.stock-row');
+    allRows.forEach(function(row) {{
+        if (rowMatchesFilters(row, filter, symbolQuery)) {{
             rows.push(row);
             row.classList.add('visible');
+            var chartCell = row.querySelector('.chart-cell');
+            if (chartCell) {{
+                createChartForCell(chartCell);
+            }}
         }} else {{
             row.classList.remove('visible');
         }}
@@ -2244,6 +2320,7 @@ function showAllRows() {{
     if (parent) {{
         rows.forEach(function(row) {{ parent.appendChild(row); }});
     }}
+    updateResultCount(rows.length, allRows.length);
 }}
 
 function filterChanged() {{
@@ -2251,28 +2328,6 @@ function filterChanged() {{
 }}
 
 showAllRows();
-
-function showRowsForFilter(filter) {{
-    document.querySelectorAll('.stock-row').forEach(function(row) {{
-        var strategies = row.getAttribute('data-strategies') || '';
-        var stratList = strategies.split(',').map(function(s) {{ return s.trim(); }});
-        if (filter === 'all' || stratList.indexOf(filter) !== -1) {{
-            row.classList.add('visible');
-            var chartCell = row.querySelector('.chart-cell');
-            if (chartCell) {{
-                createChartForCell(chartCell);
-            }}
-        }} else {{
-            row.classList.remove('visible');
-        }}
-    }});
-}}
-
-function filterChanged() {{
-    showAllRows();
-}}
-
-showRowsForFilter('all');
 
 // Copy ticker on click
 document.querySelectorAll('.stock-row').forEach(function(row) {{
