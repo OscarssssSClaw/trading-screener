@@ -833,7 +833,7 @@ print("Fetching VCP stocks...")
 try:
     total_vcp, vcp_raw = (
         Query()
-        .select('name', 'close', 'volume', 'ADR', 'Perf.6M', 'SMA20', 'SMA50', 'High.All', 'RSI', 'sector', 'industry')
+        .select('name', 'close', 'volume', 'ADR', 'Perf.6M', 'SMA20', 'SMA50', 'High.All', 'price_52_week_high', 'RSI', 'sector', 'industry')
         .where(
             Column('volume') > 1_000_000,
             Column('Perf.6M') >= 50,
@@ -854,7 +854,7 @@ print("Fetching QL stocks...")
 try:
     total_ql, ql_raw = (
         Query()
-        .select('name', 'close', 'volume', 'ADR', 'Perf.6M', 'SMA20', 'SMA50', 'High.All', 'RSI', 'sector', 'industry')
+        .select('name', 'close', 'volume', 'ADR', 'Perf.6M', 'SMA20', 'SMA50', 'High.All', 'price_52_week_high', 'RSI', 'sector', 'industry')
         .where(
             Column('volume') > 1_000_000,
             Column('Perf.6M') >= 50,
@@ -875,7 +875,7 @@ print("Fetching HTF stocks...")
 try:
     total_htf, htf_raw = (
         Query()
-        .select('name', 'close', 'volume', 'ADR', 'Perf.6M', 'SMA20', 'SMA50', 'High.All', 'RSI', 'sector', 'industry')
+        .select('name', 'close', 'volume', 'ADR', 'Perf.6M', 'SMA20', 'SMA50', 'High.All', 'price_52_week_high', 'RSI', 'sector', 'industry')
         .where(
             Column('volume') > 1_000_000,
             Column('Perf.6M') >= 50,
@@ -895,6 +895,29 @@ except:
 
 print(f"HTF: {len(htf)}")
 
+print("Fetching 52W High stocks...")
+try:
+    total_high52, high52_raw = (
+        Query()
+        .select('name', 'close', 'volume', 'ADR', 'Perf.6M', 'SMA20', 'SMA50', 'High.All', 'price_52_week_high', 'RSI', 'sector', 'industry')
+        .where(
+            Column('volume') > 1_000_000,
+            Column('close') >= 5,
+            Column('price_52_week_high') > 0
+        )
+        .limit(1000)
+        .get_scanner_data()
+    )
+    high52_raw = high52_raw[~high52_raw['ticker'].astype(str).str.startswith('OTC:')].copy()
+    high52_raw['dist_high'] = (high52_raw['High.All'] - high52_raw['close']) / high52_raw['High.All'] * 100
+    high52_raw['dist_52w_high'] = (high52_raw['price_52_week_high'] - high52_raw['close']) / high52_raw['price_52_week_high'] * 100
+    high52 = high52_raw[high52_raw['close'] >= high52_raw['price_52_week_high'] * 0.999].copy()
+    high52['is_52w_high'] = True
+except:
+    high52 = pd.DataFrame()
+
+print(f"52W High: {len(high52)}")
+
 spy_perf = get_benchmark_6m_perf('SPY')
 print(f"SPY 6M benchmark: {spy_perf:.1f}%")
 
@@ -902,11 +925,11 @@ print(f"SPY 6M benchmark: {spy_perf:.1f}%")
 # Do not use VCP as the base table: QL-only candidates would lose name/price fields
 # and get filtered out as NaN later.
 frames = []
-for df, flag in ((vcp, 'is_vcp'), (ql, 'is_ql'), (htf, 'is_htf')):
+for df, flag in ((vcp, 'is_vcp'), (ql, 'is_ql'), (htf, 'is_htf'), (high52, 'is_52w_high')):
     if df is None or df.empty:
         continue
     tmp = df.copy()
-    for col in ('is_vcp', 'is_ql', 'is_htf'):
+    for col in ('is_vcp', 'is_ql', 'is_htf', 'is_52w_high'):
         if col not in tmp.columns:
             tmp[col] = False
     tmp[flag] = True
@@ -914,20 +937,20 @@ for df, flag in ((vcp, 'is_vcp'), (ql, 'is_ql'), (htf, 'is_htf')):
 
 if frames:
     merged = pd.concat(frames, ignore_index=True, sort=False)
-    flag_cols = ['is_vcp', 'is_ql', 'is_htf']
+    flag_cols = ['is_vcp', 'is_ql', 'is_htf', 'is_52w_high']
     value_cols = [c for c in merged.columns if c not in flag_cols]
     values = merged[value_cols].groupby('ticker', as_index=False).first()
     flags = merged[['ticker'] + flag_cols].groupby('ticker', as_index=False).max()
     all_stocks = values.merge(flags, on='ticker', how='left')
 else:
-    all_stocks = pd.DataFrame(columns=['ticker', 'is_vcp', 'is_ql', 'is_htf'])
+    all_stocks = pd.DataFrame(columns=['ticker', 'is_vcp', 'is_ql', 'is_htf', 'is_52w_high'])
 
-for col in ('is_vcp', 'is_ql', 'is_htf'):
+for col in ('is_vcp', 'is_ql', 'is_htf', 'is_52w_high'):
     all_stocks[col] = all_stocks[col].fillna(False).astype(bool)
 
 required_defaults = {
     'name': '', 'close': 0.0, 'volume': 0, 'ADR': 0.0, 'Perf.6M': 0.0,
-    'SMA20': 0.0, 'SMA50': 0.0, 'High.All': 0.0, 'RSI': 0.0,
+    'SMA20': 0.0, 'SMA50': 0.0, 'High.All': 0.0, 'price_52_week_high': 0.0, 'RSI': 0.0,
     'sector': '-', 'industry': '-', 'dist_high': 0.0,
 }
 for col, default in required_defaults.items():
@@ -936,6 +959,15 @@ for col, default in required_defaults.items():
 
 # Add RS
 all_stocks['RS'] = all_stocks['Perf.6M'] - spy_perf
+all_stocks['price_52_week_high'] = pd.to_numeric(all_stocks['price_52_week_high'], errors='coerce').fillna(0.0)
+all_stocks['close'] = pd.to_numeric(all_stocks['close'], errors='coerce').fillna(0.0)
+all_stocks['is_52w_high'] = (
+    all_stocks['is_52w_high']
+    | (
+    (all_stocks['price_52_week_high'] > 0)
+    & (all_stocks['close'] >= all_stocks['price_52_week_high'] * 0.999)
+    )
+)
 
 # Filter out stocks with invalid names (NaN or empty)
 all_stocks = all_stocks[all_stocks['name'].notna()]
@@ -947,7 +979,8 @@ print(f"Total unique stocks: {len(all_stocks)}")
 vcp_count = int(all_stocks['is_vcp'].sum())
 ql_count = int(all_stocks['is_ql'].sum())
 htf_count = int(all_stocks['is_htf'].sum())
-print(f"Actual - VCP: {vcp_count}, QL: {ql_count}, HTF: {htf_count}")
+high52_count = int(all_stocks['is_52w_high'].sum())
+print(f"Actual - VCP: {vcp_count}, QL: {ql_count}, HTF: {htf_count}, 52W High: {high52_count}")
 
 # Get price data for charts
 print("Fetching price history...")
@@ -1023,6 +1056,8 @@ def make_row(row, price_data, anim_delay=0):
     name = html.escape(str(row['name']))
     close = float(row['close'])
     dist_high = float(row['dist_high'])
+    high_52w = safe_float(row.get('price_52_week_high'), 0.0)
+    is_52w_high = bool(row.get('is_52w_high', False))
     perf_6m = float(row['Perf.6M'])
     # Use our calculated ADR from yfinance, fallback to TradingView if not available
     adr = adr_data.get(ticker, float(row.get('ADR', 0) or 0))
@@ -1112,6 +1147,7 @@ def make_row(row, price_data, anim_delay=0):
     dist_color = "positive" if dist_high <= 20 else "negative"
     perf_color = "positive" if perf_6m > 0 else "negative"
     rs_color = "positive" if rs > 0 else "negative"
+    high52_title = html.escape(f"Close ${close:.2f} vs TradingView 52W high ${high_52w:.2f}", quote=True)
     
     # Build strategy badges and classes
     badges = []
@@ -1129,6 +1165,10 @@ def make_row(row, price_data, anim_delay=0):
         badges.append('<span class="strategy-badge strategy-htf">HTF</span>')
         classes.append('strategy-htf')
         strat_list.append('HTF')
+    if is_52w_high:
+        badges.append(f'<span class="strategy-badge strategy-high52" title="{high52_title}">52W High</span>')
+        classes.append('strategy-high52')
+        strat_list.append('High52')
     if gamma_score_val >= 60:
         badges.append(f'<span class="strategy-badge strategy-gamma">GS {gamma_score_val}</span>')
         classes.append('strategy-gamma')
@@ -1535,6 +1575,7 @@ body::before{{
 .strategy-badge.strategy-vcp{{background:var(--blue)}}
 .strategy-badge.strategy-qullamaggie{{background:var(--red)}}
 .strategy-badge.strategy-htf{{background:var(--accent);color:#000}}
+.strategy-badge.strategy-high52{{background:#f8fafc;color:#0f172a}}
 .strategy-badge.strategy-gamma{{background:var(--purple);color:#fff}}
 .strategy-badge.strategy-gammawall{{background:#22c55e;color:#001307}}
 .strategy-badge.strategy-short{{background:#f59e0b;color:#000}}
@@ -2103,6 +2144,7 @@ body::before{{
         <option value="VCP">VCP ({vcp_count})</option>
         <option value="Qullamaggie">Qullamaggie ({ql_count})</option>
         <option value="HTF">HTF ({htf_count})</option>
+        <option value="High52">52W High ({high52_count})</option>
         <option value="Gamma">Gamma Squeeze ({gamma_count})</option>
         <option value="GammaWall">Gamma Wall ({gamma_wall_count})</option>
         <option value="ShortFuel">Short Fuel ({short_fuel_count})</option>
@@ -2148,6 +2190,10 @@ body::before{{
         <div class="modal-section">
             <h3>HTF (High Tight Flag)</h3>
             <p>• Volume &gt; 1M<br>• 6M Return 50-150%<br>• ADR 3-15%<br>• Close &gt; SMA50<br>• Distance from High ≤ 20%</p>
+        </div>
+        <div class="modal-section">
+            <h3>52W High</h3>
+            <p>Latest close is at or above TradingView's 52-week high, using a 0.1% tolerance to avoid missing matches from quote rounding. Requires volume &gt; 1M, close ≥ $5, and excludes OTC tickers. This filter can be combined with symbol search.</p>
         </div>
         <div class="modal-section">
             <h3>RS (Relative Strength)</h3>
