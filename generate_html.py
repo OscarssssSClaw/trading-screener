@@ -178,6 +178,25 @@ def gamma_wall_score_class(score):
     return "none"
 
 
+def net_gex_class(net_gex_mn):
+    if net_gex_mn > 0:
+        return "positive"
+    if net_gex_mn < 0:
+        return "negative"
+    return "none"
+
+
+def fmt_gex_mn(net_gex_mn):
+    if net_gex_mn is None:
+        return "-"
+    net_gex_mn = safe_float(net_gex_mn, 0.0)
+    if abs(net_gex_mn) >= 100:
+        return f"{net_gex_mn:+.0f}M"
+    if abs(net_gex_mn) >= 10:
+        return f"{net_gex_mn:+.1f}M"
+    return f"{net_gex_mn:+.2f}M"
+
+
 def average_dollar_volume(price_rows, lookback=20):
     if not price_rows:
         return None
@@ -337,7 +356,7 @@ def summarize_gamma_walls(option_rows, stock_price, avg_dollar_vol=None):
         'net_gex_mn': round(total_net / 1_000_000, 2),
         'max_strength': int(max_strength),
         'basis': basis,
-        'sign_convention': 'positive GEX assumes dealer long gamma; negative GEX assumes dealer short gamma',
+        'sign_convention': 'OI proxy: calls contribute positive GEX and puts contribute negative GEX. Positive net GEX is treated as stabilizing dealer-long-gamma pressure; negative net GEX is treated as destabilizing dealer-short-gamma pressure. This is not observed dealer inventory.',
     }
 
 
@@ -706,17 +725,22 @@ def render_gamma_wall_card(gamma_map, adr):
     zero = gamma_map.get('zero_gamma')
     zero_text = f"ZG {safe_float(zero, 0):g}" if zero else "ZG -"
     net = safe_float(gamma_map.get('net_gex_mn'), 0.0)
+    net_display = fmt_gex_mn(gamma_map.get('net_gex_mn'))
+    net_class = net_gex_class(net)
     basis = html.escape(str(gamma_map.get('basis') or 'OI'))
     convention = html.escape(str(gamma_map.get('sign_convention') or ''), quote=True)
     return f"""<div class="gamma-wall-card" title="{convention}">
         <div class="gamma-wall-head">
             <span>Gamma Wall</span>
-            <strong>{int(gamma_map.get('max_strength') or 0)}</strong>
+            <div class="gamma-wall-head-metrics">
+                <b class="gamma-wall-net gex-{net_class}">GEX {net_display}</b>
+                <strong>{int(gamma_map.get('max_strength') or 0)}</strong>
+            </div>
         </div>
         {gamma_wall_line('PIN', gamma_map.get('pin'), adr)}
         {gamma_wall_line('UP', gamma_map.get('upper'), adr)}
         {gamma_wall_line('DN', gamma_map.get('lower'), adr)}
-        <div class="gamma-wall-foot">{zero_text} · Net {net:+.1f}M · Basis {basis} · ADV adj</div>
+        <div class="gamma-wall-foot">{zero_text} · Basis {basis} · ADV adj</div>
     </div>"""
 
 
@@ -982,6 +1006,30 @@ htf_count = int(all_stocks['is_htf'].sum())
 high52_count = int(all_stocks['is_52w_high'].sum())
 print(f"Actual - VCP: {vcp_count}, QL: {ql_count}, HTF: {htf_count}, 52W High: {high52_count}")
 
+
+def clean_industry_label(value):
+    text = str(value or '-').strip()
+    if not text or text.lower() in ('nan', 'none'):
+        return '-'
+    return text
+
+
+industry_counts = {}
+for _, row in all_stocks.iterrows():
+    sector_label = clean_industry_label(row.get('sector', '-'))
+    industry_label = clean_industry_label(row.get('industry', '-'))
+    key = (sector_label, industry_label)
+    industry_counts[key] = industry_counts.get(key, 0) + 1
+
+industry_options = ['<option value="all">All Industries</option>']
+for (sector_label, industry_label), count in sorted(industry_counts.items(), key=lambda item: (item[0][0], item[0][1])):
+    if sector_label == '-' and industry_label == '-':
+        continue
+    value = html.escape(f"{sector_label}||{industry_label}", quote=True)
+    label = html.escape(f"{sector_label} - {industry_label} ({count})")
+    industry_options.append(f'<option value="{value}">{label}</option>')
+industry_filter_options = "\n        ".join(industry_options)
+
 # Get price data for charts
 print("Fetching price history...")
 price_data = {}
@@ -1106,6 +1154,8 @@ def make_row(row, price_data, anim_delay=0):
         gamma_wall_parts.append(f"{zero_part} | Basis {gamma_map.get('basis') or 'OI'}")
     gamma_wall_title = html.escape(" | ".join(gamma_wall_parts) if gamma_wall_parts else "No gamma wall", quote=True)
     gamma_wall_card = render_gamma_wall_card(gamma_map, adr)
+    net_gex_mn = gamma_map.get('net_gex_mn') if gamma_map else None
+    net_gex_value = safe_float(net_gex_mn, 0.0) if net_gex_mn is not None else 0.0
     if primary_contract:
         verify_text = str(primary_contract.get('verification', 'Pending'))
         verify_class = html.escape(verify_text.lower().split()[0])
@@ -1141,8 +1191,12 @@ def make_row(row, price_data, anim_delay=0):
         call_float_title = html.escape(f"Displayed contract volume share-equivalent: {call_share_equiv:,} shares ({contract_call_volume:,} contracts) / float {float_shares:,}. Not delta-adjusted.", quote=True)
     else:
         call_float_title = "Call/Float unavailable: missing float shares or no displayed gamma contract. Not delta-adjusted."
-    sector = html.escape(str(row.get('sector', '-')))
-    industry = html.escape(str(row.get('industry', '-')))
+    sector_raw = clean_industry_label(row.get('sector', '-'))
+    industry_raw = clean_industry_label(row.get('industry', '-'))
+    sector = html.escape(sector_raw)
+    industry = html.escape(industry_raw)
+    sector_attr = html.escape(sector_raw, quote=True)
+    industry_attr = html.escape(industry_raw, quote=True)
     
     dist_color = "positive" if dist_high <= 20 else "negative"
     perf_color = "positive" if perf_6m > 0 else "negative"
@@ -1193,7 +1247,7 @@ def make_row(row, price_data, anim_delay=0):
     optional_cards = "\n".join(card for card in (gamma_card, gamma_wall_card) if card)
     
     return f'''
-    <div class="stock-row {classes_str}" data-symbol="{symbol_attr}" data-strategies="{data_strategies}" data-rs="{rs:.1f}" data-iv="{iv_attr}" data-gamma="{gamma_score_val}" data-wall="{gamma_wall_score_val}" data-short="{short_float if short_float is not None else 0}" data-callfloat="{call_float_pct if call_float_pct is not None else 0}" data-price="{close}" data-dist="{dist_high:.1f}">
+    <div class="stock-row {classes_str}" data-symbol="{symbol_attr}" data-sector="{sector_attr}" data-industry="{industry_attr}" data-strategies="{data_strategies}" data-rs="{rs:.1f}" data-iv="{iv_attr}" data-gamma="{gamma_score_val}" data-wall="{gamma_wall_score_val}" data-gexnet="{net_gex_value:.2f}" data-short="{short_float if short_float is not None else 0}" data-callfloat="{call_float_pct if call_float_pct is not None else 0}" data-price="{close}" data-dist="{dist_high:.1f}">
         <div class="stock-header">
             <div class="stock-name">{name}</div>
             <div class="stock-ticker">{ticker_display} {badges_str}</div>
@@ -1581,7 +1635,7 @@ body::before{{
 .strategy-badge.strategy-short{{background:#f59e0b;color:#000}}
 .strategy-badge.strategy-callfloat{{background:#14b8a6;color:#001311}}
 
-.gamma-value,.gamma-wall-value{{
+.gamma-value,.gamma-wall-value,.gex-value{{
     font-size:15px;
     font-weight:700;
     padding:4px 10px;
@@ -1592,6 +1646,10 @@ body::before{{
 .gamma-med{{background:var(--blue);color:#fff}}
 .gamma-low{{background:var(--bg-secondary);color:var(--text-secondary);border:1px solid var(--border)}}
 .gamma-none{{color:var(--text-muted)}}
+
+.gex-positive{{background:rgba(34,197,94,0.18);color:#86efac;border:1px solid rgba(34,197,94,0.35)}}
+.gex-negative{{background:rgba(255,71,87,0.16);color:#ff9aa5;border:1px solid rgba(255,71,87,0.35)}}
+.gex-none{{color:var(--text-muted)}}
 
 .short-value{{
     font-size:13px;
@@ -1751,11 +1809,26 @@ body::before{{
     display:flex;
     justify-content:space-between;
     align-items:center;
+    gap:8px;
     font-size:9px;
     text-transform:uppercase;
     letter-spacing:1px;
     color:#bbf7d0;
     font-weight:900;
+}}
+.gamma-wall-head-metrics{{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    letter-spacing:0;
+    text-transform:none;
+}}
+.gamma-wall-net{{
+    font-size:10px;
+    font-weight:900;
+    padding:2px 7px;
+    border-radius:999px;
+    white-space:nowrap;
 }}
 .gamma-wall-head strong{{
     background:#22c55e;
@@ -2039,9 +2112,9 @@ body::before{{
         border:1px solid var(--border);
         border-radius:12px;
     }}
-    .iv-value,.gamma-value,.gamma-wall-value{{
+    .iv-value,.gamma-value,.gamma-wall-value,.gex-value{{
         font-size:13px;
-        padding:3px 7px;
+        padding:3px 6px;
         margin-top:2px;
     }}
 
@@ -2150,6 +2223,9 @@ body::before{{
         <option value="ShortFuel">Short Fuel ({short_fuel_count})</option>
         <option value="CallFloat">Call/Float</option>
     </select>
+    <select class="filter-select" id="industryFilter" onchange="filterChanged()">
+        {industry_filter_options}
+    </select>
     <select class="filter-select" id="sortFilter" onchange="sortChanged()">
         <option value="rs-desc">RS ↓ (High to Low)</option>
         <option value="rs-asc">RS ↑ (Low to High)</option>
@@ -2157,6 +2233,7 @@ body::before{{
         <option value="iv-asc">IV ↑ (Low to High)</option>
         <option value="gamma-desc">GS ↓ (Gamma Score)</option>
         <option value="wall-desc">GW ↓ (Wall Strength)</option>
+        <option value="gex-abs-desc">|GEX| ↓ (Net GEX)</option>
         <option value="short-desc">Short Float ↓</option>
         <option value="callfloat-desc">Call/Float ↓</option>
         <option value="price-desc">Price ↓</option>
@@ -2206,6 +2283,10 @@ body::before{{
         <div class="modal-section">
             <h3>Gamma Wall</h3>
             <p>Major upper/lower high-gamma strike and current pin candidate from 30DTE option chains. Wall strength is 0-100 using abs-GEX as basis points of the stock's 20D average dollar volume, then adjusted for data basis and expiry. This makes 100 much harder to reach and avoids showing a nearby low-quality strike as a wall. Basis OI uses open interest; Basis VOL is an intraday volume-gamma fallback when yfinance returns zero OI. Zero gamma is a regime boundary, not a magnet. yfinance data is a proxy and does not reveal true dealer inventory.</p>
+        </div>
+        <div class="modal-section">
+            <h3>GEX (Net Gamma Exposure)</h3>
+            <p>OI-based net gamma proxy in millions of dollars per 1% move. Calls are counted as positive GEX and puts as negative GEX. Positive net GEX is treated as stabilizing dealer-long-gamma pressure, where hedging tends to sell rallies and buy dips. Negative net GEX is treated as destabilizing dealer-short-gamma pressure, where hedging can chase moves and increase volatility. This is not observed dealer inventory; confirm with trade-side flow when available.</p>
         </div>
         <div class="modal-section">
             <h3>Short Fuel</h3>
@@ -2301,13 +2382,76 @@ function getSymbolQuery() {{
     return input ? input.value.trim().toUpperCase() : '';
 }}
 
-function rowMatchesFilters(row, strategyFilter, symbolQuery) {{
+function getIndustryFilter() {{
+    var select = document.getElementById('industryFilter');
+    return select ? select.value : 'all';
+}}
+
+function getRowIndustry(row) {{
+    var sector = row.getAttribute('data-sector') || '-';
+    var industry = row.getAttribute('data-industry') || '-';
+    return {{
+        key: sector + '||' + industry,
+        label: sector + ' - ' + industry
+    }};
+}}
+
+function rowMatchesBaseFilters(row, strategyFilter, symbolQuery) {{
     var strategies = row.getAttribute('data-strategies') || '';
     var stratList = strategies.split(',').map(function(s) {{ return s.trim(); }});
     var matchesStrategy = strategyFilter === 'all' || stratList.indexOf(strategyFilter) !== -1;
     var symbol = (row.getAttribute('data-symbol') || '').toUpperCase();
     var matchesSymbol = !symbolQuery || symbol.indexOf(symbolQuery) !== -1;
     return matchesStrategy && matchesSymbol;
+}}
+
+function refreshIndustryOptions(strategyFilter, symbolQuery) {{
+    var select = document.getElementById('industryFilter');
+    if (!select) return 'all';
+
+    var selected = select.value || 'all';
+    var counts = {{}};
+    var labels = {{}};
+    var allRows = document.querySelectorAll('.stock-row');
+
+    allRows.forEach(function(row) {{
+        if (!rowMatchesBaseFilters(row, strategyFilter, symbolQuery)) return;
+        var info = getRowIndustry(row);
+        if (info.key === '-||-') return;
+        counts[info.key] = (counts[info.key] || 0) + 1;
+        labels[info.key] = info.label;
+    }});
+
+    var keys = Object.keys(counts).sort(function(a, b) {{
+        return labels[a].localeCompare(labels[b]);
+    }});
+
+    select.innerHTML = '';
+    var allOption = document.createElement('option');
+    allOption.value = 'all';
+    allOption.textContent = 'All Industries';
+    select.appendChild(allOption);
+
+    keys.forEach(function(key) {{
+        var option = document.createElement('option');
+        option.value = key;
+        option.textContent = labels[key] + ' (' + counts[key] + ')';
+        select.appendChild(option);
+    }});
+
+    if (selected !== 'all' && counts[selected]) {{
+        select.value = selected;
+    }} else {{
+        select.value = 'all';
+    }}
+    return select.value;
+}}
+
+function rowMatchesFilters(row, strategyFilter, industryFilter, symbolQuery) {{
+    if (!rowMatchesBaseFilters(row, strategyFilter, symbolQuery)) return false;
+    var info = getRowIndustry(row);
+    var matchesIndustry = industryFilter === 'all' || industryFilter === info.key;
+    return matchesIndustry;
 }}
 
 function updateResultCount(count, total) {{
@@ -2320,10 +2464,11 @@ function updateResultCount(count, total) {{
 function showAllRows() {{
     var filter = document.getElementById('strategyFilter').value;
     var symbolQuery = getSymbolQuery();
+    var industryFilter = refreshIndustryOptions(filter, symbolQuery);
     var rows = [];
     var allRows = document.querySelectorAll('.stock-row');
     allRows.forEach(function(row) {{
-        if (rowMatchesFilters(row, filter, symbolQuery)) {{
+        if (rowMatchesFilters(row, filter, industryFilter, symbolQuery)) {{
             rows.push(row);
             row.classList.add('visible');
             var chartCell = row.querySelector('.chart-cell');
@@ -2348,6 +2493,8 @@ function showAllRows() {{
             return parseFloat(b.getAttribute('data-gamma') || 0) - parseFloat(a.getAttribute('data-gamma') || 0);
         }} else if (currentSort === 'wall-desc') {{
             return parseFloat(b.getAttribute('data-wall') || 0) - parseFloat(a.getAttribute('data-wall') || 0);
+        }} else if (currentSort === 'gex-abs-desc') {{
+            return Math.abs(parseFloat(b.getAttribute('data-gexnet') || 0)) - Math.abs(parseFloat(a.getAttribute('data-gexnet') || 0));
         }} else if (currentSort === 'short-desc') {{
             return parseFloat(b.getAttribute('data-short') || 0) - parseFloat(a.getAttribute('data-short') || 0);
         }} else if (currentSort === 'callfloat-desc') {{
