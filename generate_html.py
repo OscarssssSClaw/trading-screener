@@ -830,24 +830,34 @@ def get_price_and_adr(ticker, days=90):
         if len(hist) >= 20:
             ranges = []
             for i in range(-20, 0):
-                high = hist.iloc[i]['High']
-                low = hist.iloc[i]['Low']
-                close = hist.iloc[i]['Close']
-                if close > 0:
+                high = safe_float(hist.iloc[i].get('High'), float('nan'))
+                low = safe_float(hist.iloc[i].get('Low'), float('nan'))
+                close = safe_float(hist.iloc[i].get('Close'), float('nan'))
+                if all(math.isfinite(v) for v in (high, low, close)) and close > 0:
                     daily_range = ((high - low) / close) * 100
-                    ranges.append(daily_range)
+                    if math.isfinite(daily_range):
+                        ranges.append(daily_range)
             if ranges:
                 adr = sum(ranges) / len(ranges)
         
         data = []
         for idx, row in hist.iterrows():
+            open_px = safe_float(row.get('Open'), float('nan'))
+            high_px = safe_float(row.get('High'), float('nan'))
+            low_px = safe_float(row.get('Low'), float('nan'))
+            close_px = safe_float(row.get('Close'), float('nan'))
+            if not all(math.isfinite(v) and v > 0 for v in (open_px, high_px, low_px, close_px)):
+                continue
+            volume = safe_float(row.get('Volume'), 0.0)
+            if not math.isfinite(volume) or volume < 0:
+                volume = 0.0
             data.append({
                 'time': int(idx.timestamp()),
-                'open': float(row['Open']),
-                'high': float(row['High']),
-                'low': float(row['Low']),
-                'close': float(row['Close']),
-                'volume': int(row['Volume']) if 'Volume' in row else 0
+                'open': open_px,
+                'high': high_px,
+                'low': low_px,
+                'close': close_px,
+                'volume': int(volume)
             })
         return data, adr
     except:
@@ -1111,7 +1121,7 @@ def make_row(row, price_data, anim_delay=0):
     adr = adr_data.get(ticker, float(row.get('ADR', 0) or 0))
     rs = float(row.get('RS', 0))
     chart_id = "chart_" + ticker.replace(':', '_')
-    price_json = json.dumps(price_data.get(ticker, []))
+    price_json = json.dumps(price_data.get(ticker, []), allow_nan=False)
     iv_val = iv_data.get(ticker)
     iv_attr = f'{iv_val:.4f}' if iv_val is not None else '0'
     if iv_val is not None and iv_val >= 1:
