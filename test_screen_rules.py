@@ -7,6 +7,7 @@ from screen_rules import (
     ADV_MIN_DOLLARS,
     HTF_MAX_DRAWDOWN_PCT,
     HTF_POLE_MIN_PCT,
+    MIN_MARKET_CAP,
     QL_PERCENTILE_MIN,
     ScanError,
     add_leadership_scores,
@@ -106,6 +107,7 @@ def quote(**overrides):
         'Perf.Y': 80.0,
         'adv_dollar': 5_000_000.0,
         'average_volume_30d_calc': 50_000.0,
+        'market_cap_basic': 20_000_000_000.0,
     }
     row.update(overrides)
     return row
@@ -113,31 +115,91 @@ def quote(**overrides):
 
 class LiquidityTests(unittest.TestCase):
     def test_adv_dollar_not_share_volume(self):
+        large = MIN_MARKET_CAP
         # $80 and 50k shares is $4M. The old share-volume > 1M gate would drop this.
-        self.assertTrue(passes_liquidity(80, 50_000))
+        self.assertTrue(passes_liquidity(80, 50_000, large))
         self.assertGreaterEqual(80 * 50_000, ADV_MIN_DOLLARS)
         # 1.2M shares at $2 is $2.4M and under the $5 price floor. Share volume alone is not enough.
-        self.assertFalse(passes_liquidity(2, 1_200_000))
-        self.assertFalse(passes_liquidity(10, 200_000))
-        self.assertTrue(passes_liquidity(10, 400_000))
+        self.assertFalse(passes_liquidity(2, 1_200_000, large))
+        self.assertFalse(passes_liquidity(10, 200_000, large))
+        self.assertTrue(passes_liquidity(10, 400_000, large))
+        self.assertTrue(passes_liquidity(80, 50_000, 5_000_000_000))
+        self.assertFalse(passes_liquidity(80, 50_000, 4_999_999_999))
+        self.assertFalse(passes_liquidity(80, 50_000, None))
 
-    def test_prepare_quotes_uses_dollar_volume(self):
-        frame = pd.DataFrame([{
-            'ticker': 'NASDAQ:PRICEY',
-            'name': 'PRICEY',
-            'description': 'Pricey Inc.',
-            'close': 80,
-            'volume': 40_000,
-            'average_volume_30d_calc': 50_000,
-            'ADR': 6,
-            'price_52_week_high': 82,
-            'price_52_week_low': 40,
-            'exchange': 'NASDAQ',
-        }])
+    def test_prepare_quotes_uses_dollar_volume_and_market_cap(self):
+        frame = pd.DataFrame([
+            {
+                'ticker': 'NASDAQ:PRICEY',
+                'name': 'PRICEY',
+                'description': 'Pricey Inc.',
+                'close': 80,
+                'volume': 40_000,
+                'average_volume_30d_calc': 50_000,
+                'ADR': 6,
+                'price_52_week_high': 82,
+                'price_52_week_low': 40,
+                'exchange': 'NASDAQ',
+                'market_cap_basic': MIN_MARKET_CAP,
+            },
+            {
+                'ticker': 'NASDAQ:KOD',
+                'name': 'KOD',
+                'description': 'Small Cap Inc.',
+                'close': 40,
+                'volume': 2_000_000,
+                'average_volume_30d_calc': 2_000_000,
+                'ADR': 8,
+                'price_52_week_high': 42,
+                'price_52_week_low': 10,
+                'exchange': 'NASDAQ',
+                'market_cap_basic': 1_200_000_000,
+            },
+            {
+                'ticker': 'NASDAQ:NOCAP',
+                'name': 'NOCAP',
+                'description': 'Missing Cap Inc.',
+                'close': 80,
+                'volume': 50_000,
+                'average_volume_30d_calc': 50_000,
+                'ADR': 6,
+                'price_52_week_high': 82,
+                'price_52_week_low': 40,
+                'exchange': 'NASDAQ',
+                'market_cap_basic': None,
+            },
+        ])
         prepared = prepare_quotes(frame)
-        self.assertTrue(bool(prepared.iloc[0]['liquid']))
-        self.assertEqual(prepared.iloc[0]['company'], 'Pricey Inc.')
-        self.assertAlmostEqual(prepared.iloc[0]['adv_dollar'], 4_000_000)
+        pricey = prepared.loc[prepared['ticker'] == 'NASDAQ:PRICEY'].iloc[0]
+        small = prepared.loc[prepared['ticker'] == 'NASDAQ:KOD'].iloc[0]
+        missing = prepared.loc[prepared['ticker'] == 'NASDAQ:NOCAP'].iloc[0]
+        self.assertTrue(bool(pricey['liquid']))
+        self.assertEqual(pricey['company'], 'Pricey Inc.')
+        self.assertAlmostEqual(pricey['adv_dollar'], 4_000_000)
+        self.assertFalse(bool(small['liquid']))
+        self.assertFalse(bool(missing['liquid']))
+
+    def test_strategy_gates_reject_sub_five_billion(self):
+        small = quote(ticker='NASDAQ:KOD', market_cap_basic=1_200_000_000, liquid=True)
+        self.assertFalse(evaluate_vcp(small, vcp_bars())['passes'])
+        self.assertIn('market_cap', evaluate_vcp(small, vcp_bars())['note'])
+        self.assertFalse(evaluate_ql(small, ql_bars())['passes'])
+        self.assertFalse(evaluate_htf(small, htf_bars())['passes'])
+        frame = pd.DataFrame([small])
+        self.assertFalse(bool(vcp_coarse_mask(frame).iloc[0]))
+        self.assertFalse(bool(ql_coarse_mask(frame).iloc[0]))
+        self.assertFalse(bool(htf_coarse_mask(frame).iloc[0]))
+        bare = pd.DataFrame([{key: value for key, value in quote().items() if key != 'market_cap_basic'}])
+        self.assertFalse(bool(vcp_coarse_mask(bare).iloc[0]))
+        self.assertFalse(bool(ql_coarse_mask(bare).iloc[0]))
+        self.assertFalse(bool(htf_coarse_mask(bare).iloc[0]))
+        high = pd.DataFrame([quote(ticker='NASDAQ:KOD', dist_52w=0.05, liquid=True, market_cap_basic=800_000_000)])
+        board, _stats = classify_board(
+            pd.DataFrame([quote(ticker='NYSE:BIG', dist_52w=20, ql_pct=10, rs_pct=10, **{'Perf.1M': 1, 'Perf.3M': 1, 'Perf.6M': 1})]),
+            high,
+            lambda ticker: None,
+        )
+        self.assertTrue(board.empty or 'NASDAQ:KOD' not in set(board['ticker']))
 
 
 class DistanceTests(unittest.TestCase):

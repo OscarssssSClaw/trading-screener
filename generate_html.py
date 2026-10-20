@@ -23,6 +23,7 @@ from screen_rules import (
     HTF_POLE_MAX_DAYS,
     HTF_POLE_MIN_DAYS,
     HTF_POLE_MIN_PCT,
+    MIN_MARKET_CAP,
     MIN_PRICE,
     NEAR_52W_MAX_DIST,
     QL_MAX_DIST_52W,
@@ -2360,20 +2361,20 @@ body::before{{
         <div class="modal-section">
             <h3>VCP (Volatility Contraction Pattern)</h3>
             <p>Price-only Minervini trend template plus contraction. Not a SEPA earnings screen.<br>
-            • Close ≥ ${MIN_PRICE:.0f} and ADV$ ≥ ${ADV_MIN_DOLLARS:,.0f} (30-day average share volume × close)<br>
+            • Close ≥ ${MIN_PRICE:.0f}, ADV$ ≥ ${ADV_MIN_DOLLARS:,.0f} (30-day average share volume × close), and market cap ≥ ${MIN_MARKET_CAP:,.0f} (TradingView `market_cap_basic`). A missing cap does not pass<br>
             • TradingView ADR ≥ {ADR_MIN_PCT:.0f}%<br>
             • Close &gt; SMA50 &gt; SMA150 &gt; SMA200, and at least {VCP_MIN_ABOVE_LOW_PCT:.0f}% above the 52-week low<br>
             • Within {VCP_MAX_DIST_52W:.0f}% of the 52-week high. All-time high is not the gate<br>
             • SMA200 higher than it was about a month ago, from yfinance daily bars<br>
-            • RS proxy ≥ {VCP_MIN_RS_PERCENTILE:.0f}: percentile of 20% 1M + 40% 3M + 20% 6M + 20% 12M inside the liquid universe. Not the IBD RS Rating<br>
+            • RS proxy ≥ {VCP_MIN_RS_PERCENTILE:.0f}: percentile of 20% 1M + 40% 3M + 20% 6M + 20% 12M inside the liquid universe (price, ADV$, and market cap ≥ ${MIN_MARKET_CAP / 1_000_000_000:.0f}B). Not the IBD RS Rating<br>
             • Last 10 sessions' range at least {100 - VCP_RANGE_TIGHTEN * 100:.0f}% tighter than the range 20 sessions earlier, and 10-session volume ≤ {VCP_DRYUP_RATIO * 100:.0f}% of the prior 20 sessions<br>
             Skipped in v1: earnings growth, EPS acceleration, sponsorship.</p>
         </div>
         <div class="modal-section">
             <h3>Qullamaggie</h3>
             <p>Leadership is a universe percentile, not a fixed 6-month return.<br>
-            • Same price, ADV$, and ADR ≥ {ADR_MIN_PCT:.0f}% floor. No ADR ceiling<br>
-            • Blended 45% 1M + 35% 3M + 20% 6M performance at or above the {QL_PERCENTILE_MIN:.0f}th percentile of the liquid universe (top {QL_TOP_PERCENT:.0f}%)<br>
+            • Same price, ADV$, ${MIN_MARKET_CAP / 1_000_000_000:.0f}B market-cap floor, and ADR ≥ {ADR_MIN_PCT:.0f}% floor. No ADR ceiling<br>
+            • Blended 45% 1M + 35% 3M + 20% 6M performance at or above the {QL_PERCENTILE_MIN:.0f}th percentile of that liquid universe (top {QL_TOP_PERCENT:.0f}%)<br>
             • Within {QL_MAX_DIST_52W:.0f}% of the 52-week high<br>
             • Close within 5% of the 10- or 20-day average, above the 20-day, with the 20-day rising and the 10-day not rolling over<br>
             • 15-session high-low range ≤ {QL_MAX_RANGE_15D:.0f}% and not more than 15% wider than the previous 15 sessions</p>
@@ -2381,7 +2382,7 @@ body::before{{
         <div class="modal-section">
             <h3>HTF (High Tight Flag)</h3>
             <p>Pole plus a short flag. This is not a higher-time-frame filter, and there is no 6-month return cap.<br>
-            • Same price, ADV$, and ADR ≥ {ADR_MIN_PCT:.0f}% floor<br>
+            • Same price, ADV$, ${MIN_MARKET_CAP / 1_000_000_000:.0f}B market-cap floor, and ADR ≥ {ADR_MIN_PCT:.0f}% floor<br>
             • Pole ≥ {HTF_POLE_MIN_PCT:.0f}% from the lowest close of the first 5 sessions of a {HTF_POLE_MIN_DAYS}–{HTF_POLE_MAX_DAYS} session thrust to that thrust's high. The thrust has to finish near its high<br>
             • The most recent {HTF_FLAG_MIN_DAYS}–{HTF_FLAG_MAX_DAYS} sessions are the flag. Drawdown from the pole high ≤ {HTF_MAX_DRAWDOWN_PCT:.0f}%, and the flag does not run more than 5% through the pole high<br>
             • Flag average volume ≤ {HTF_MAX_FLAG_VOL_RATIO * 100:.0f}% of pole average volume<br>
@@ -2389,7 +2390,7 @@ body::before{{
         </div>
         <div class="modal-section">
             <h3>52W High</h3>
-            <p>Close is within {NEAR_52W_MAX_DIST:.1f}% of TradingView's 52-week high (at least 99.9% of that high). The scanner applies that test directly, then this job pages through every match and sorts by distance. It does not take the largest 1,000 names by market cap and then check the high. Liquidity is close ≥ ${MIN_PRICE:.0f} and ADV$ ≥ ${ADV_MIN_DOLLARS:,.0f}. OTC names are excluded. ADR is not required here, so quieter large caps can still show up.</p>
+            <p>Close is within {NEAR_52W_MAX_DIST:.1f}% of TradingView's 52-week high (at least 99.9% of that high). The scanner applies that test directly, then this job pages through every match and sorts by distance. It does not take the largest 1,000 names by market cap and then check the high. Liquidity is close ≥ ${MIN_PRICE:.0f}, ADV$ ≥ ${ADV_MIN_DOLLARS:,.0f}, and market cap ≥ ${MIN_MARKET_CAP:,.0f}. That floor is a minimum; every near-high match at or above it is still paged in. OTC names are excluded. ADR is not required here, so quieter large caps can still show up.</p>
         </div>
         <div class="modal-section">
             <h3>52W distance and RS</h3>
@@ -2403,7 +2404,7 @@ body::before{{
         </div>
         <div class="modal-section">
             <h3>Field limits</h3>
-            <p>ADV$ is last close times TradingView `average_volume_30d_calc`, not a true average of daily dollar volume. SMA levels come from TradingView. SMA200 slope, the VCP contraction, the Qullamaggie pause, and the flag geometry use yfinance daily bars; a name with no usable history does not get that badge. TradingView has no 9-month performance field, so the RS proxy uses 12-month for the oldest weight. A loose 1M/3M/6M floor only limits which High Tight Flag names get a history download. It has no upper bound.</p>
+            <p>ADV$ is last close times TradingView `average_volume_30d_calc`, not a true average of daily dollar volume. Market cap is TradingView `market_cap_basic`; a missing or non-numeric value fails closed and is excluded from the liquid universe and from VCP, Qullamaggie, High Tight Flag, and the 52-week high list. SMA levels come from TradingView. SMA200 slope, the VCP contraction, the Qullamaggie pause, and the flag geometry use yfinance daily bars; a name with no usable history does not get that badge. TradingView has no 9-month performance field, so the RS proxy uses 12-month for the oldest weight. A loose 1M/3M/6M floor only limits which High Tight Flag names get a history download. It has no upper bound.</p>
         </div>
         <div class="modal-section">
             <h3>GS (Gamma Squeeze Candidate)</h3>

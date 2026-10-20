@@ -21,6 +21,8 @@ class ScanError(RuntimeError):
 ADR_MIN_PCT = 4.0
 MIN_PRICE = 5.0
 ADV_MIN_DOLLARS = 3_000_000
+# Options book: no small or penny names. Missing market cap fails closed.
+MIN_MARKET_CAP = 5_000_000_000
 MIN_LIQUID_UNIVERSE = 200
 MIN_BOARD_SIZE = 10
 
@@ -85,10 +87,29 @@ def adv_dollars(close, average_share_volume):
     return price * shares
 
 
-def passes_liquidity(close, average_share_volume):
+def passes_market_cap(market_cap):
+    cap = num(market_cap)
+    return cap is not None and cap >= MIN_MARKET_CAP
+
+
+def passes_liquidity(close, average_share_volume, market_cap):
     price = num(close)
     dollar = adv_dollars(close, average_share_volume)
-    return price is not None and price >= MIN_PRICE and dollar is not None and dollar >= ADV_MIN_DOLLARS
+    return (
+        price is not None
+        and price >= MIN_PRICE
+        and dollar is not None
+        and dollar >= ADV_MIN_DOLLARS
+        and passes_market_cap(market_cap)
+    )
+
+
+def market_cap_ok(df):
+    """True only where market_cap_basic is present and at least the hard floor."""
+    if df is None or 'market_cap_basic' not in getattr(df, 'columns', []):
+        return pd.Series(False, index=getattr(df, 'index', None))
+    cap = pd.to_numeric(df['market_cap_basic'], errors='coerce')
+    return cap.ge(MIN_MARKET_CAP).fillna(False)
 
 
 def dist_from_high_pct(close, high):
@@ -245,6 +266,7 @@ def evaluate_vcp(row, bars):
     checks = trend_template_checks(row)
     slope = sma200_is_rising(bars or [])
     checks['sma200_rising'] = slope is True
+    checks['market_cap'] = passes_market_cap(_row_num(row, 'market_cap_basic'))
     contraction = contraction_stats(bars or [])
     passes = all(checks.values()) and contraction['passes']
     failed = [name for name, ok in checks.items() if not ok]
@@ -281,6 +303,8 @@ def evaluate_ql(row, bars):
     reasons = []
     if not liquid:
         reasons.append('liquidity')
+    if not passes_market_cap(_row_num(row, 'market_cap_basic')):
+        reasons.append('market_cap')
     if not adr_ok:
         reasons.append('adr')
     if ql_pct is None or ql_pct < QL_PERCENTILE_MIN:
@@ -329,7 +353,7 @@ def evaluate_ql(row, bars):
     range_text = f"{range_15:.1f}%" if range_15 is not None else "n/a"
     note = (
         f"Qullamaggie leadership percentile {ql_text} of the liquid universe "
-        f"(top {QL_TOP_PERCENT:.0f}% = {QL_PERCENTILE_MIN:.0f}+). "
+        f"(market cap >= ${MIN_MARKET_CAP:,.0f}; top {QL_TOP_PERCENT:.0f}% = {QL_PERCENTILE_MIN:.0f}+). "
         f"Dist 52W {dist_text}. 15-session range {range_text}. "
         "Gate is the percentile blend of 1M/3M/6M, not a fixed 6-month return."
     )
@@ -417,6 +441,8 @@ def evaluate_htf(row, bars):
     reasons = []
     if not _flag(row, 'liquid'):
         reasons.append('liquidity')
+    if not passes_market_cap(_row_num(row, 'market_cap_basic')):
+        reasons.append('market_cap')
     if not _flag(row, 'adr_ok'):
         reasons.append('adr')
     if dist is None or dist > HTF_MAX_DIST_52W:
@@ -424,7 +450,7 @@ def evaluate_htf(row, bars):
     setup = None if reasons else find_htf(bars or [])
     if setup is None:
         reasons.append('pole_flag')
-    passes = bool(setup) and not any(name in ('liquidity', 'adr', 'dist_52w') for name in reasons)
+    passes = bool(setup) and not any(name in ('liquidity', 'market_cap', 'adr', 'dist_52w') for name in reasons)
     perf_text = f"{perf_6m:.0f}%" if perf_6m is not None else "n/a"
     if setup:
         note = (
@@ -465,7 +491,15 @@ def vcp_coarse_mask(df):
     above_low = low.notna() & (low > 0) & close.notna() & (close >= low * (1 + VCP_MIN_ABOVE_LOW_PCT / 100.0))
     near_high = dist.notna() & (dist <= VCP_MAX_DIST_52W)
     rs_ok = rs_pct.notna() & (rs_pct >= VCP_MIN_RS_PERCENTILE)
-    return df['liquid'].fillna(False) & df['adr_ok'].fillna(False) & stack & above_low & near_high & rs_ok
+    return (
+        df['liquid'].fillna(False)
+        & market_cap_ok(df)
+        & df['adr_ok'].fillna(False)
+        & stack
+        & above_low
+        & near_high
+        & rs_ok
+    )
 
 
 def ql_coarse_mask(df):
@@ -473,6 +507,7 @@ def ql_coarse_mask(df):
     ql_pct = df['ql_pct']
     return (
         df['liquid'].fillna(False)
+        & market_cap_ok(df)
         & df['adr_ok'].fillna(False)
         & ql_pct.notna()
         & (ql_pct >= QL_PERCENTILE_MIN)
@@ -491,6 +526,7 @@ def htf_coarse_mask(df):
     )
     return (
         df['liquid'].fillna(False)
+        & market_cap_ok(df)
         & df['adr_ok'].fillna(False)
         & dist.notna()
         & (dist <= HTF_MAX_DIST_52W)
@@ -592,7 +628,7 @@ def classify_board(liquid, high52, load_bars):
     else:
         near = high52['dist_52w'].notna() & (high52['dist_52w'] <= NEAR_52W_MAX_DIST)
         liquid_flag = high52['liquid'].fillna(False) if 'liquid' in high52.columns else False
-        high_ids = set(high52.loc[near & liquid_flag, 'ticker'].astype(str))
+        high_ids = set(high52.loc[near & liquid_flag & market_cap_ok(high52), 'ticker'].astype(str))
 
     extra = pd.DataFrame()
     if high_ids:
@@ -667,7 +703,8 @@ def assert_publishable(*, universe_total, fetched, liquid_count, scored_rs, boar
         )
     if liquid_count < MIN_LIQUID_UNIVERSE:
         raise ScanError(
-            f"Only {liquid_count} names passed ADV$ >= ${ADV_MIN_DOLLARS:,.0f}. Refusing to publish."
+            f"Only {liquid_count} names passed ADV$ >= ${ADV_MIN_DOLLARS:,.0f} "
+            f"and market cap >= ${MIN_MARKET_CAP:,.0f}. Refusing to publish."
         )
     if scored_rs < MIN_LIQUID_UNIVERSE:
         raise ScanError(
