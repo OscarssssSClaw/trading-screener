@@ -4,12 +4,42 @@
 import time
 import datetime
 import math
+import urllib.parse
 import yfinance as yf
-from tradingview_screener import Query, Column
 import pandas as pd
 import json
 import html
 from pathlib import Path
+
+from market_scan import scan_liquid_universe, scan_near_52w
+from screen_rules import (
+    ADR_MIN_PCT,
+    ADV_MIN_DOLLARS,
+    HTF_FLAG_MAX_DAYS,
+    HTF_FLAG_MIN_DAYS,
+    HTF_MAX_DIST_52W,
+    HTF_MAX_DRAWDOWN_PCT,
+    HTF_MAX_FLAG_VOL_RATIO,
+    HTF_POLE_MAX_DAYS,
+    HTF_POLE_MIN_DAYS,
+    HTF_POLE_MIN_PCT,
+    MIN_PRICE,
+    NEAR_52W_MAX_DIST,
+    QL_MAX_DIST_52W,
+    QL_MAX_RANGE_15D,
+    QL_PERCENTILE_MIN,
+    QL_TOP_PERCENT,
+    ScanError,
+    VCP_DRYUP_RATIO,
+    VCP_MAX_DIST_52W,
+    VCP_MIN_ABOVE_LOW_PCT,
+    VCP_MIN_RS_PERCENTILE,
+    VCP_RANGE_TIGHTEN,
+    assert_publishable,
+    classify_board,
+    clip_text,
+    sector_strength,
+)
 
 start = time.time()
 now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))
@@ -773,7 +803,7 @@ def fmt_yfinance_datetime(value):
         return str(value)
 
 def get_short_interest_for_ticker(ticker):
-    empty = {'short_float_pct': None, 'short_ratio': None, 'shares_short': None, 'shares_short_prior': None, 'shares_short_change': None, 'shares_short_change_pct': None, 'float_shares': None, 'date_short_interest': '-', 'fuel': 'None'}
+    empty = {'short_float_pct': None, 'short_ratio': None, 'shares_short': None, 'shares_short_prior': None, 'shares_short_change': None, 'shares_short_change_pct': None, 'float_shares': None, 'date_short_interest': '-', 'fuel': 'None', 'business_summary': ''}
     symbol = yfinance_symbol(ticker)
     if not symbol:
         return empty
@@ -807,6 +837,7 @@ def get_short_interest_for_ticker(ticker):
                 'float_shares': int(float_shares) if float_shares is not None else None,
                 'date_short_interest': fmt_date_from_epoch(info.get('dateShortInterest')),
                 'fuel': fuel,
+                'business_summary': str(info.get('longBusinessSummary') or '').strip(),
             }
         except Exception:
             if attempt < 2:
@@ -815,13 +846,13 @@ def get_short_interest_for_ticker(ticker):
             return empty
     return empty
 
-def get_price_and_adr(ticker, days=90):
+def get_price_and_adr(ticker, days=90, period=None):
     symbol = yfinance_symbol(ticker)
     if not symbol:
         return None, None
     try:
         t = yf.Ticker(symbol)
-        hist = t.history(period=f"{days}d")
+        hist = t.history(period=period or f"{days}d")
         if hist.empty or len(hist) < 30:
             return None, None
         
@@ -863,159 +894,73 @@ def get_price_and_adr(ticker, days=90):
     except:
         return None, None
 
-print("Fetching VCP stocks...")
+price_data = {}
+adr_data = {}
+business_summaries = {}
+
+def load_pattern_bars(ticker):
+    prices, adr = get_price_and_adr(ticker, period='2y')
+    if not prices:
+        return None
+    price_data[ticker] = prices[-90:]
+    if adr and adr > 0:
+        adr_data[ticker] = adr
+    time.sleep(0.15)
+    return prices
+
+print("Scanning liquid US common stocks...")
 try:
-    total_vcp, vcp_raw = (
-        Query()
-        .select('name', 'close', 'volume', 'ADR', 'Perf.6M', 'SMA20', 'SMA50', 'High.All', 'price_52_week_high', 'RSI', 'sector', 'industry')
-        .where(
-            Column('volume') > 1_000_000,
-            Column('Perf.6M') >= 50,
-            Column('close') > Column('SMA50')
-        )
-        .limit(500)
-        .get_scanner_data()
-    )
-    vcp_raw['dist_high'] = (vcp_raw['High.All'] - vcp_raw['close']) / vcp_raw['High.All'] * 100
-    vcp = vcp_raw[vcp_raw['dist_high'] <= 25].copy()
-    vcp['is_vcp'] = True
-except:
-    vcp = pd.DataFrame()
+    liquid, universe_stats = scan_liquid_universe()
+    print("Scanning names within 0.1% of the 52-week high...")
+    high52, high_stats = scan_near_52w()
+except ScanError:
+    raise
+except Exception as exc:
+    raise ScanError(f"Market scan failed: {exc}") from exc
 
-print(f"VCP: {len(vcp)}")
-
-print("Fetching QL stocks...")
-try:
-    total_ql, ql_raw = (
-        Query()
-        .select('name', 'close', 'volume', 'ADR', 'Perf.6M', 'SMA20', 'SMA50', 'High.All', 'price_52_week_high', 'RSI', 'sector', 'industry')
-        .where(
-            Column('volume') > 1_000_000,
-            Column('Perf.6M') >= 50,
-            Column('close') > Column('SMA20')
-        )
-        .limit(500)
-        .get_scanner_data()
-    )
-    ql_raw['dist_high'] = (ql_raw['High.All'] - ql_raw['close']) / ql_raw['High.All'] * 100
-    ql = ql_raw[ql_raw['dist_high'] <= 15].copy()
-    ql['is_ql'] = True
-except:
-    ql = pd.DataFrame()
-
-print(f"QL: {len(ql)}")
-
-print("Fetching HTF stocks...")
-try:
-    total_htf, htf_raw = (
-        Query()
-        .select('name', 'close', 'volume', 'ADR', 'Perf.6M', 'SMA20', 'SMA50', 'High.All', 'price_52_week_high', 'RSI', 'sector', 'industry')
-        .where(
-            Column('volume') > 1_000_000,
-            Column('Perf.6M') >= 50,
-            Column('Perf.6M') <= 150,
-            Column('ADR') >= 3,
-            Column('ADR') <= 15,
-            Column('close') > Column('SMA50')
-        )
-        .limit(500)
-        .get_scanner_data()
-    )
-    htf_raw['dist_high'] = (htf_raw['High.All'] - htf_raw['close']) / htf_raw['High.All'] * 100
-    htf = htf_raw[htf_raw['dist_high'] <= 20].copy()
-    htf['is_htf'] = True
-except:
-    htf = pd.DataFrame()
-
-print(f"HTF: {len(htf)}")
-
-print("Fetching 52W High stocks...")
-try:
-    total_high52, high52_raw = (
-        Query()
-        .select('name', 'close', 'volume', 'ADR', 'Perf.6M', 'SMA20', 'SMA50', 'High.All', 'price_52_week_high', 'RSI', 'sector', 'industry')
-        .where(
-            Column('volume') > 1_000_000,
-            Column('close') >= 5,
-            Column('price_52_week_high') > 0
-        )
-        .limit(1000)
-        .get_scanner_data()
-    )
-    high52_raw = high52_raw[~high52_raw['ticker'].astype(str).str.startswith('OTC:')].copy()
-    high52_raw['dist_high'] = (high52_raw['High.All'] - high52_raw['close']) / high52_raw['High.All'] * 100
-    high52_raw['dist_52w_high'] = (high52_raw['price_52_week_high'] - high52_raw['close']) / high52_raw['price_52_week_high'] * 100
-    high52 = high52_raw[high52_raw['close'] >= high52_raw['price_52_week_high'] * 0.999].copy()
-    high52['is_52w_high'] = True
-except:
-    high52 = pd.DataFrame()
-
-print(f"52W High: {len(high52)}")
-
-spy_perf = get_benchmark_6m_perf('SPY')
-print(f"SPY 6M benchmark: {spy_perf:.1f}%")
-
-# Merge all three datasets on ticker while preserving full rows from every strategy.
-# Do not use VCP as the base table: QL-only candidates would lose name/price fields
-# and get filtered out as NaN later.
-frames = []
-for df, flag in ((vcp, 'is_vcp'), (ql, 'is_ql'), (htf, 'is_htf'), (high52, 'is_52w_high')):
-    if df is None or df.empty:
-        continue
-    tmp = df.copy()
-    for col in ('is_vcp', 'is_ql', 'is_htf', 'is_52w_high'):
-        if col not in tmp.columns:
-            tmp[col] = False
-    tmp[flag] = True
-    frames.append(tmp)
-
-if frames:
-    merged = pd.concat(frames, ignore_index=True, sort=False)
-    flag_cols = ['is_vcp', 'is_ql', 'is_htf', 'is_52w_high']
-    value_cols = [c for c in merged.columns if c not in flag_cols]
-    values = merged[value_cols].groupby('ticker', as_index=False).first()
-    flags = merged[['ticker'] + flag_cols].groupby('ticker', as_index=False).max()
-    all_stocks = values.merge(flags, on='ticker', how='left')
+if not liquid.empty and 'dist_52w' in liquid.columns:
+    universe_near = liquid.loc[liquid['dist_52w'].notna() & (liquid['dist_52w'] <= NEAR_52W_MAX_DIST)]
 else:
-    all_stocks = pd.DataFrame(columns=['ticker', 'is_vcp', 'is_ql', 'is_htf', 'is_52w_high'])
-
-for col in ('is_vcp', 'is_ql', 'is_htf', 'is_52w_high'):
-    all_stocks[col] = all_stocks[col].fillna(False).astype(bool)
-
-required_defaults = {
-    'name': '', 'close': 0.0, 'volume': 0, 'ADR': 0.0, 'Perf.6M': 0.0,
-    'SMA20': 0.0, 'SMA50': 0.0, 'High.All': 0.0, 'price_52_week_high': 0.0, 'RSI': 0.0,
-    'sector': '-', 'industry': '-', 'dist_high': 0.0,
-}
-for col, default in required_defaults.items():
-    if col not in all_stocks.columns:
-        all_stocks[col] = default
-
-# Add RS
-all_stocks['RS'] = all_stocks['Perf.6M'] - spy_perf
-all_stocks['price_52_week_high'] = pd.to_numeric(all_stocks['price_52_week_high'], errors='coerce').fillna(0.0)
-all_stocks['close'] = pd.to_numeric(all_stocks['close'], errors='coerce').fillna(0.0)
-all_stocks['is_52w_high'] = (
-    all_stocks['is_52w_high']
-    | (
-    (all_stocks['price_52_week_high'] > 0)
-    & (all_stocks['close'] >= all_stocks['price_52_week_high'] * 0.999)
+    universe_near = liquid.iloc[0:0]
+print(
+    f"52W cross-check: dedicated liquid matches={high_stats['liquid_near']} "
+    f"universe liquid within {NEAR_52W_MAX_DIST}%={len(universe_near)}"
+)
+if high_stats['liquid_near'] == 0 and len(universe_near) >= 20:
+    raise ScanError(
+        "52-week scan returned no liquid names, but the universe has many within 0.1% of the 52-week high."
     )
+
+assert_publishable(
+    universe_total=universe_stats['scanner_total'],
+    fetched=universe_stats['fetched'],
+    liquid_count=universe_stats['liquid'],
+    scored_rs=universe_stats['scored_rs'],
+    board_count=None,
 )
 
-# Filter out stocks with invalid names (NaN or empty)
+all_stocks, _class_stats = classify_board(liquid, high52, load_pattern_bars)
 all_stocks = all_stocks[all_stocks['name'].notna()]
-all_stocks = all_stocks[all_stocks['name'] != '']
-all_stocks = all_stocks[all_stocks['name'].astype(str) != 'nan']
-all_stocks = all_stocks[all_stocks['name'].astype(str) != 'None']
+all_stocks = all_stocks[all_stocks['name'].astype(str).str.strip() != '']
+all_stocks = all_stocks[~all_stocks['name'].astype(str).str.lower().isin(['nan', 'none'])]
+
+spy_perf = get_benchmark_6m_perf('SPY')
+print(f"SPY 6M benchmark (context only, not the RS figure): {spy_perf:.1f}%")
+
+assert_publishable(
+    universe_total=universe_stats['scanner_total'],
+    fetched=universe_stats['fetched'],
+    liquid_count=universe_stats['liquid'],
+    scored_rs=universe_stats['scored_rs'],
+    board_count=len(all_stocks),
+)
 
 print(f"Total unique stocks: {len(all_stocks)}")
 vcp_count = int(all_stocks['is_vcp'].sum())
 ql_count = int(all_stocks['is_ql'].sum())
 htf_count = int(all_stocks['is_htf'].sum())
 high52_count = int(all_stocks['is_52w_high'].sum())
-print(f"Actual - VCP: {vcp_count}, QL: {ql_count}, HTF: {htf_count}, 52W High: {high52_count}")
-
+print(f"Actual - VCP: {vcp_count}, Qullamaggie: {ql_count}, High Tight Flag: {htf_count}, 52W High: {high52_count}")
 
 def clean_industry_label(value):
     text = str(value or '-').strip()
@@ -1040,11 +985,11 @@ for (sector_label, industry_label), count in sorted(industry_counts.items(), key
     industry_options.append(f'<option value="{value}">{label}</option>')
 industry_filter_options = "\n        ".join(industry_options)
 
-# Get price data for charts
-print("Fetching price history...")
-price_data = {}
-adr_data = {}
+# Pattern checks already filled price_data / adr_data for VCP, QL, and HTF names.
+print(f"Fetching price history for names not already loaded ({len(price_data)} cached)...")
 for i, ticker in enumerate(all_stocks['ticker'].tolist()):
+    if ticker in price_data:
+        continue
     prices, adr = get_price_and_adr(ticker, 90)
     if prices:
         price_data[ticker] = prices
@@ -1098,6 +1043,8 @@ print("Fetching short interest data...")
 short_data = {}
 for i, ticker in enumerate(all_stocks['ticker'].tolist()):
     si = get_short_interest_for_ticker(ticker)
+    if si.get('business_summary'):
+        business_summaries[ticker] = si['business_summary']
     if si.get('short_float_pct') is not None or si.get('short_ratio') is not None:
         short_data[ticker] = si
     if (i + 1) % 10 == 0:
@@ -1111,15 +1058,58 @@ def make_row(row, price_data, anim_delay=0):
     ticker_display = html.escape(ticker)
     symbol = ticker.split(':')[-1].upper()
     symbol_attr = html.escape(symbol, quote=True)
-    name = html.escape(str(row['name']))
+    raw_name = clean_industry_label(row.get('name', ''))
+    if raw_name == '-':
+        raw_name = symbol
+    name = html.escape(raw_name)
+    summary_full = clip_text(business_summaries.get(ticker, ''), 800)
+    summary_short = clip_text(summary_full, 280)
+    summary_html = ''
+    if summary_short:
+        summary_html = (
+            f'<div class="stock-desc" title="{html.escape(summary_full, quote=True)}">{html.escape(summary_short)}</div>'
+        )
+    tv_href = html.escape(
+        'https://www.tradingview.com/chart/?symbol=' + urllib.parse.quote(ticker, safe=''),
+        quote=True,
+    )
+    ticker_link = (
+        f'<a class="ticker-link" href="{tv_href}" target="_blank" rel="noopener noreferrer">{ticker_display}</a>'
+    )
     close = float(row['close'])
-    dist_high = float(row['dist_high'])
+    dist_52w = safe_float(row.get('dist_52w', row.get('dist_high')), 0.0)
     high_52w = safe_float(row.get('price_52_week_high'), 0.0)
     is_52w_high = bool(row.get('is_52w_high', False))
-    perf_6m = float(row['Perf.6M'])
-    # Use our calculated ADR from yfinance, fallback to TradingView if not available
-    adr = adr_data.get(ticker, float(row.get('ADR', 0) or 0))
-    rs = float(row.get('RS', 0))
+    perf_6m = safe_float(row['Perf.6M'], 0.0)
+    tv_adr = safe_float(row.get('ADR'), 0.0)
+    yf_adr = adr_data.get(ticker)
+    adr = tv_adr if tv_adr > 0 else safe_float(yf_adr, 0.0)
+    adr_title = f"TradingView ADR {tv_adr:.1f}%. Pattern gate is at least {ADR_MIN_PCT:.0f}%."
+    if yf_adr:
+        adr_title += f" yfinance 20-day ADR {safe_float(yf_adr, 0):.1f}%."
+    adr_title = html.escape(adr_title, quote=True)
+    rs_number = safe_float(row.get('rs_rating', row.get('RS')), None)
+    if rs_number is None:
+        rs_display = '-'
+        rs_attr = 0.0
+        rs_color = 'negative'
+    else:
+        rs_display = f'{rs_number:.0f}'
+        rs_attr = rs_number
+        rs_color = 'positive' if rs_number >= VCP_MIN_RS_PERCENTILE else 'negative'
+    rs_title = html.escape(
+        'Percentile RS proxy (1-99) of weighted 1-month, 3-month, 6-month, and 12-month performance '
+        'inside the liquid universe. Not the IBD RS Rating, and not 6-month return minus SPY.',
+        quote=True,
+    )
+    ql_pct = safe_float(row.get('ql_pct'), None)
+    perf_title = 'TradingView 6-month percent change.'
+    if ql_pct is not None:
+        perf_title += (
+            f' Qullamaggie blend percentile {ql_pct:.0f} '
+            f'(top {QL_TOP_PERCENT:.0f}% starts at {QL_PERCENTILE_MIN:.0f}).'
+        )
+    perf_title = html.escape(perf_title, quote=True)
     chart_id = "chart_" + ticker.replace(':', '_')
     price_json = json.dumps(price_data.get(ticker, []), allow_nan=False)
     iv_val = iv_data.get(ticker)
@@ -1208,25 +1198,47 @@ def make_row(row, price_data, anim_delay=0):
     sector_attr = html.escape(sector_raw, quote=True)
     industry_attr = html.escape(industry_raw, quote=True)
     
-    dist_color = "positive" if dist_high <= 20 else "negative"
+    dist_color = "positive" if dist_52w <= VCP_MAX_DIST_52W else "negative"
     perf_color = "positive" if perf_6m > 0 else "negative"
-    rs_color = "positive" if rs > 0 else "negative"
-    high52_title = html.escape(f"Close ${close:.2f} vs TradingView 52W high ${high_52w:.2f}", quote=True)
-    
+    ath = safe_float(row.get('High.All'), 0.0)
+    ath_bit = ''
+    if ath > 0 and close > 0:
+        ath_bit = f' All-time-high distance is {(ath - close) / ath * 100:.1f}% and is not the gate.'
+    dist_title = html.escape(
+        f'Percent below the 52-week high (${high_52w:.2f}).{ath_bit}',
+        quote=True,
+    )
+    high52_title = html.escape(
+        f"Close ${close:.2f} is within {NEAR_52W_MAX_DIST:.1f}% of TradingView's 52-week high ${high_52w:.2f}. All-time high is not the gate.",
+        quote=True,
+    )
+
+    def note_title(text, fallback):
+        raw = str(text or '').strip()
+        if raw.lower() in ('', 'nan', 'none'):
+            raw = fallback
+        return html.escape(raw, quote=True)
+
     # Build strategy badges and classes
     badges = []
     classes = []
     strat_list = []
     if row.get('is_vcp', False):
-        badges.append('<span class="strategy-badge strategy-vcp">VCP</span>')
+        badges.append(
+            f'<span class="strategy-badge strategy-vcp" title="{note_title(row.get("vcp_note"), "VCP: trend template plus contraction and volume dry-up. Not a SEPA earnings screen.")}">VCP</span>'
+        )
         classes.append('strategy-vcp')
         strat_list.append('VCP')
     if row.get('is_ql', False):
-        badges.append('<span class="strategy-badge strategy-qullamaggie">Qullamaggie</span>')
+        badges.append(
+            f'<span class="strategy-badge strategy-qullamaggie" title="{note_title(row.get("ql_note"), "Qullamaggie: liquid-universe leadership percentile, ADR floor, and a tight pause near the 10/20-day averages.")}">Qullamaggie</span>'
+        )
         classes.append('strategy-qullamaggie')
         strat_list.append('Qullamaggie')
     if row.get('is_htf', False):
-        badges.append('<span class="strategy-badge strategy-htf">HTF</span>')
+        badges.append(
+            f'<span class="strategy-badge strategy-htf" title="{note_title(row.get("htf_note"), "HTF means High Tight Flag: an 80%+ pole and a short flag. It does not mean higher timeframe.")}">HTF</span>'
+        )
         classes.append('strategy-htf')
         strat_list.append('HTF')
     if is_52w_high:
@@ -1257,11 +1269,12 @@ def make_row(row, price_data, anim_delay=0):
     optional_cards = "\n".join(card for card in (gamma_card, gamma_wall_card) if card)
     
     return f'''
-    <div class="stock-row {classes_str}" data-symbol="{symbol_attr}" data-sector="{sector_attr}" data-industry="{industry_attr}" data-strategies="{data_strategies}" data-rs="{rs:.1f}" data-iv="{iv_attr}" data-gamma="{gamma_score_val}" data-wall="{gamma_wall_score_val}" data-gexnet="{net_gex_value:.2f}" data-short="{short_float if short_float is not None else 0}" data-callfloat="{call_float_pct if call_float_pct is not None else 0}" data-price="{close}" data-dist="{dist_high:.1f}">
+    <div class="stock-row {classes_str}" data-symbol="{symbol_attr}" data-sector="{sector_attr}" data-industry="{industry_attr}" data-strategies="{data_strategies}" data-rs="{rs_attr:.1f}" data-iv="{iv_attr}" data-gamma="{gamma_score_val}" data-wall="{gamma_wall_score_val}" data-gexnet="{net_gex_value:.2f}" data-short="{short_float if short_float is not None else 0}" data-callfloat="{call_float_pct if call_float_pct is not None else 0}" data-price="{close}" data-dist="{dist_52w:.1f}">
         <div class="stock-header">
             <div class="stock-name">{name}</div>
-            <div class="stock-ticker">{ticker_display} {badges_str}</div>
+            <div class="stock-ticker">{ticker_link} {badges_str}</div>
             <div class="stock-sector">{sector} - {industry}</div>
+            {summary_html}
         </div>
         <div class="mobile-primary-metrics">
             <div class="stock-price">${close:.2f}</div>
@@ -1271,10 +1284,10 @@ def make_row(row, price_data, anim_delay=0):
         </div>
 {optional_cards}
         <div class="secondary-metrics">
-            <div class="metric">Dist<br><span class="{dist_color}">{dist_high:.1f}%</span></div>
-            <div class="metric">6M<br><span class="{perf_color}">{perf_6m:.1f}%</span></div>
-            <div class="metric">RS<br><span class="{rs_color}">{rs:.1f}%</span></div>
-            <div class="metric">ADR<br>{adr:.1f}%</div>
+            <div class="metric" title="{dist_title}">52W<br><span class="{dist_color}">{dist_52w:.1f}%</span></div>
+            <div class="metric" title="{perf_title}">6M<br><span class="{perf_color}">{perf_6m:.1f}%</span></div>
+            <div class="metric" title="{rs_title}">RS<br><span class="{rs_color}">{rs_display}</span></div>
+            <div class="metric" title="{adr_title}">ADR<br>{adr:.1f}%</div>
             <div class="metric short-metric" title="{short_title}">Short<br><span class="short-value short-{short_class}">{short_display}</span></div>
             <div class="metric callfloat-metric" title="{call_float_title}">Call/Float<br><span class="callfloat-value callfloat-{call_float_class}">{call_float_display}</span></div>
         </div>
@@ -1283,6 +1296,20 @@ def make_row(row, price_data, anim_delay=0):
     </div>'''
 
 all_rows = ''.join([make_row(row, price_data, i*0.05) for i, (_, row) in enumerate(all_stocks.iterrows())])
+
+strength = sector_strength(all_stocks['sector'].tolist())
+pills = []
+for sector_label, count in strength:
+    pills.append(f'<span class="sector-pill">{html.escape(sector_label)} <b>{count}</b></span>')
+if not pills:
+    pills.append('<span class="sector-pill">No sector data</span>')
+sector_summary_html = (
+    '<div class="sector-summary">'
+    '<div class="sector-summary-row"><span class="filter-label">Sector strength</span>'
+    f'<div class="sector-pills">{"".join(pills)}</div></div>'
+    '<p class="sector-note">Counts of names on this board (VCP, Qullamaggie, High Tight Flag, 52-week high). No pinned watchlist. 52W is distance to the 52-week high.</p>'
+    '</div>'
+)
 
 html = f'''<!DOCTYPE html>
 <html>
@@ -1582,6 +1609,67 @@ body::before{{
     color:var(--text-muted);
     font-size:10px;
     margin-top:4px;
+}}
+
+.stock-desc{{
+    color:var(--text-secondary);
+    font-size:11px;
+    line-height:1.35;
+    margin-top:6px;
+    display:-webkit-box;
+    -webkit-line-clamp:2;
+    -webkit-box-orient:vertical;
+    overflow:hidden;
+}}
+
+.ticker-link{{
+    color:var(--accent);
+    font-weight:700;
+    text-decoration:none;
+}}
+
+.ticker-link:hover{{
+    text-decoration:underline;
+}}
+
+.sector-summary{{
+    background:var(--bg-secondary);
+    border-bottom:1px solid var(--border);
+    padding:4px 24px 12px;
+}}
+
+.sector-summary-row{{
+    display:flex;
+    gap:10px;
+    align-items:flex-start;
+    flex-wrap:wrap;
+}}
+
+.sector-pills{{
+    display:flex;
+    flex-wrap:wrap;
+    gap:6px;
+    flex:1;
+}}
+
+.sector-pill{{
+    background:var(--bg-card);
+    border:1px solid var(--border);
+    border-radius:999px;
+    padding:3px 8px;
+    font-size:11px;
+    color:var(--text-secondary);
+}}
+
+.sector-pill b{{
+    color:var(--accent);
+    margin-left:4px;
+}}
+
+.sector-note{{
+    color:var(--text-muted);
+    font-size:11px;
+    margin-top:6px;
 }}
 
 .stock-price{{
@@ -2054,6 +2142,8 @@ body::before{{
     }}
 
     .content{{padding:12px}}
+    .sector-summary{{padding:8px 12px 10px}}
+    .sector-note{{font-size:10px}}
 
     .stock-row{{
         flex-wrap:wrap;
@@ -2215,7 +2305,7 @@ body::before{{
 <div class="header">
     <h1>Trading <span>Screener</span></h1>
     <div class="header-meta">
-        <p>SPY 6M benchmark: <span>{spy_perf:.1f}%</span> | <span>{len(all_stocks)}</span> stocks</p>
+        <p>SPY 6M context: <span>{spy_perf:.1f}%</span> | <span>{len(all_stocks)}</span> stocks</p>
         <p>Updated: {last_updated}</p>
     </div>
     <button class="info-btn" onclick="showInfo()">ℹ️ Info</button>
@@ -2226,7 +2316,7 @@ body::before{{
         <option value="all">All ({len(all_stocks)})</option>
         <option value="VCP">VCP ({vcp_count})</option>
         <option value="Qullamaggie">Qullamaggie ({ql_count})</option>
-        <option value="HTF">HTF ({htf_count})</option>
+        <option value="HTF">High Tight Flag ({htf_count})</option>
         <option value="High52">52W High ({high52_count})</option>
         <option value="Gamma">Gamma Squeeze ({gamma_count})</option>
         <option value="GammaWall">Gamma Wall ({gamma_wall_count})</option>
@@ -2248,16 +2338,17 @@ body::before{{
         <option value="callfloat-desc">Call/Float ↓</option>
         <option value="price-desc">Price ↓</option>
         <option value="price-asc">Price ↑</option>
-        <option value="dist-asc">Dist ↑ (Near High)</option>
+        <option value="dist-asc">52W ↑ (Near high)</option>
     </select>
     <input class="filter-input" id="symbolSearch" type="search" placeholder="Search symbol..." autocomplete="off" spellcheck="false" oninput="filterChanged()">
     <span class="result-count" id="resultCount">Showing {len(all_stocks)} / {len(all_stocks)}</span>
 </div>
+{sector_summary_html}
 <div class="col-header">
     <div style="flex:1;min-width:150px">Stock</div>
     <div style="width:80px">Price</div>
     <div style="width:60px">IV</div>
-    <div style="width:60px">Dist</div>
+    <div style="width:60px">52W</div>
     <div style="width:60px">6M</div>
     <div style="width:60px">RS</div>
     <div style="width:60px">ADR</div>
@@ -2268,23 +2359,51 @@ body::before{{
         <div class="modal-title">📊 Strategy Criteria</div>
         <div class="modal-section">
             <h3>VCP (Volatility Contraction Pattern)</h3>
-            <p>• Volume &gt; 1M<br>• 6M Return ≥ 50%<br>• Close &gt; SMA50<br>• Distance from High ≤ 25%</p>
+            <p>Price-only Minervini trend template plus contraction. Not a SEPA earnings screen.<br>
+            • Close ≥ ${MIN_PRICE:.0f} and ADV$ ≥ ${ADV_MIN_DOLLARS:,.0f} (30-day average share volume × close)<br>
+            • TradingView ADR ≥ {ADR_MIN_PCT:.0f}%<br>
+            • Close &gt; SMA50 &gt; SMA150 &gt; SMA200, and at least {VCP_MIN_ABOVE_LOW_PCT:.0f}% above the 52-week low<br>
+            • Within {VCP_MAX_DIST_52W:.0f}% of the 52-week high. All-time high is not the gate<br>
+            • SMA200 higher than it was about a month ago, from yfinance daily bars<br>
+            • RS proxy ≥ {VCP_MIN_RS_PERCENTILE:.0f}: percentile of 20% 1M + 40% 3M + 20% 6M + 20% 12M inside the liquid universe. Not the IBD RS Rating<br>
+            • Last 10 sessions' range at least {100 - VCP_RANGE_TIGHTEN * 100:.0f}% tighter than the range 20 sessions earlier, and 10-session volume ≤ {VCP_DRYUP_RATIO * 100:.0f}% of the prior 20 sessions<br>
+            Skipped in v1: earnings growth, EPS acceleration, sponsorship.</p>
         </div>
         <div class="modal-section">
-            <h3>Qullamaggie Breakout</h3>
-            <p>• Volume &gt; 1M<br>• 6M Return ≥ 50%<br>• Close &gt; SMA20<br>• Distance from High ≤ 15%</p>
+            <h3>Qullamaggie</h3>
+            <p>Leadership is a universe percentile, not a fixed 6-month return.<br>
+            • Same price, ADV$, and ADR ≥ {ADR_MIN_PCT:.0f}% floor. No ADR ceiling<br>
+            • Blended 45% 1M + 35% 3M + 20% 6M performance at or above the {QL_PERCENTILE_MIN:.0f}th percentile of the liquid universe (top {QL_TOP_PERCENT:.0f}%)<br>
+            • Within {QL_MAX_DIST_52W:.0f}% of the 52-week high<br>
+            • Close within 5% of the 10- or 20-day average, above the 20-day, with the 20-day rising and the 10-day not rolling over<br>
+            • 15-session high-low range ≤ {QL_MAX_RANGE_15D:.0f}% and not more than 15% wider than the previous 15 sessions</p>
         </div>
         <div class="modal-section">
             <h3>HTF (High Tight Flag)</h3>
-            <p>• Volume &gt; 1M<br>• 6M Return 50-150%<br>• ADR 3-15%<br>• Close &gt; SMA50<br>• Distance from High ≤ 20%</p>
+            <p>Pole plus a short flag. This is not a higher-time-frame filter, and there is no 6-month return cap.<br>
+            • Same price, ADV$, and ADR ≥ {ADR_MIN_PCT:.0f}% floor<br>
+            • Pole ≥ {HTF_POLE_MIN_PCT:.0f}% from the lowest close of the first 5 sessions of a {HTF_POLE_MIN_DAYS}–{HTF_POLE_MAX_DAYS} session thrust to that thrust's high. The thrust has to finish near its high<br>
+            • The most recent {HTF_FLAG_MIN_DAYS}–{HTF_FLAG_MAX_DAYS} sessions are the flag. Drawdown from the pole high ≤ {HTF_MAX_DRAWDOWN_PCT:.0f}%, and the flag does not run more than 5% through the pole high<br>
+            • Flag average volume ≤ {HTF_MAX_FLAG_VOL_RATIO * 100:.0f}% of pole average volume<br>
+            • Close near the 10- or 20-day average and within {HTF_MAX_DIST_52W:.0f}% of the 52-week high</p>
         </div>
         <div class="modal-section">
             <h3>52W High</h3>
-            <p>Latest close is at or above TradingView's 52-week high, using a 0.1% tolerance to avoid missing matches from quote rounding. Requires volume &gt; 1M, close ≥ $5, and excludes OTC tickers. This filter can be combined with symbol search.</p>
+            <p>Close is within {NEAR_52W_MAX_DIST:.1f}% of TradingView's 52-week high (at least 99.9% of that high). The scanner applies that test directly, then this job pages through every match and sorts by distance. It does not take the largest 1,000 names by market cap and then check the high. Liquidity is close ≥ ${MIN_PRICE:.0f} and ADV$ ≥ ${ADV_MIN_DOLLARS:,.0f}. OTC names are excluded. ADR is not required here, so quieter large caps can still show up.</p>
         </div>
         <div class="modal-section">
-            <h3>RS (Relative Strength)</h3>
-            <p>Stock's TradingView 6M return minus SPY's yfinance 6M return.<br>Positive = outperforming market by percentage points.</p>
+            <h3>52W distance and RS</h3>
+            <p>The 52W figure is percent below the 52-week high. All-time high is shown only as a note and is not a gate for VCP, Qullamaggie, or High Tight Flag.<br>
+            RS is the 1–99 percentile proxy above. SPY's 6-month change in the header is market context, not the RS calculation.</p>
+        </div>
+        <div class="modal-section">
+            <h3>Names, links, and sectors</h3>
+            <p>The title is TradingView's company name (`description`). The paragraph under it is yfinance `longBusinessSummary` from the same info request as short interest, when Yahoo returns one. The ticker opens the TradingView chart.<br>
+            Sector strength counts names on this board. There is no pinned watchlist.</p>
+        </div>
+        <div class="modal-section">
+            <h3>Field limits</h3>
+            <p>ADV$ is last close times TradingView `average_volume_30d_calc`, not a true average of daily dollar volume. SMA levels come from TradingView. SMA200 slope, the VCP contraction, the Qullamaggie pause, and the flag geometry use yfinance daily bars; a name with no usable history does not get that badge. TradingView has no 9-month performance field, so the RS proxy uses 12-month for the oldest weight. A loose 1M/3M/6M floor only limits which High Tight Flag names get a history download. It has no upper bound.</p>
         </div>
         <div class="modal-section">
             <h3>GS (Gamma Squeeze Candidate)</h3>
@@ -2536,7 +2655,7 @@ showAllRows();
 document.querySelectorAll('.stock-row').forEach(function(row) {{
     row.addEventListener('click', function(e) {{
         // Don't copy if clicking on chart
-        if (e.target.closest('.chart-cell') || e.target.closest('.gamma-contract-card') || e.target.closest('.modal')) return;
+        if (e.target.closest('.chart-cell') || e.target.closest('.gamma-contract-card') || e.target.closest('.modal') || e.target.closest('a')) return;
         
         var ticker = row.querySelector('.stock-ticker');
         if (ticker) {{

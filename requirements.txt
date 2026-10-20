@@ -1,2 +1,3 @@
-yfinance
-tradingview-screener
+yfinance==1.7.0
+tradingview-screener==3.2.2
+pandas==2.2.3
