@@ -1,6 +1,9 @@
 name: Deploy Trading Screener
 
 on:
+  push:
+    branches:
+      - main
   schedule:
     # Weekdays at 3:00 AM Hong Kong time after US trading days (19:00 UTC Mon-Fri)
     - cron: '0 19 * * 1-5'
