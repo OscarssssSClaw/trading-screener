@@ -970,22 +970,6 @@ def clean_industry_label(value):
     return text
 
 
-industry_counts = {}
-for _, row in all_stocks.iterrows():
-    sector_label = clean_industry_label(row.get('sector', '-'))
-    industry_label = clean_industry_label(row.get('industry', '-'))
-    key = (sector_label, industry_label)
-    industry_counts[key] = industry_counts.get(key, 0) + 1
-
-industry_options = ['<option value="all">All Industries</option>']
-for (sector_label, industry_label), count in sorted(industry_counts.items(), key=lambda item: (item[0][0], item[0][1])):
-    if sector_label == '-' and industry_label == '-':
-        continue
-    value = html.escape(f"{sector_label}||{industry_label}", quote=True)
-    label = html.escape(f"{sector_label} - {industry_label} ({count})")
-    industry_options.append(f'<option value="{value}">{label}</option>')
-industry_filter_options = "\n        ".join(industry_options)
-
 # Pattern checks already filled price_data / adr_data for VCP, QL, and HTF names.
 print(f"Fetching price history for names not already loaded ({len(price_data)} cached)...")
 for i, ticker in enumerate(all_stocks['ticker'].tolist()):
@@ -1233,22 +1217,14 @@ def make_row(row, price_data, anim_delay=0):
         badges.append(f'<span class="strategy-badge strategy-high52" title="{high52_title}">52W High</span>')
         classes.append('strategy-high52')
         strat_list.append('High52')
+    # Squeeze badges stay in the data attributes for the Squeeze list. They are not drawn on the card.
     if gamma_score_val >= 60:
-        badges.append(f'<span class="strategy-badge strategy-gamma">GS {gamma_score_val}</span>')
-        classes.append('strategy-gamma')
         strat_list.append('Gamma')
     if short_fuel in ('High', 'Very High'):
-        badge_text = 'SI VH' if short_fuel == 'Very High' else 'SI High'
-        badges.append(f'<span class="strategy-badge strategy-short">{badge_text}</span>')
-        classes.append('strategy-short')
         strat_list.append('ShortFuel')
     if call_float_pct is not None and call_float_pct >= 5:
-        badges.append(f'<span class="strategy-badge strategy-callfloat">CF {call_float_pct:.1f}%</span>')
-        classes.append('strategy-callfloat')
         strat_list.append('CallFloat')
     if gamma_wall_score_val >= 60:
-        badges.append(f'<span class="strategy-badge strategy-gammawall">GW {gamma_wall_score_val}</span>')
-        classes.append('strategy-gammawall')
         strat_list.append('GammaWall')
     
     badges_str = ''.join(badges)
@@ -1258,7 +1234,6 @@ def make_row(row, price_data, anim_delay=0):
     squeeze_keys = {'Gamma', 'GammaWall', 'ShortFuel', 'CallFloat'}
     data_setup = '1' if any(name in setup_keys for name in strat_list) else '0'
     data_squeeze = '1' if any(name in squeeze_keys for name in strat_list) else '0'
-    optional_cards = "\n".join(card for card in (gamma_card, gamma_wall_card) if card)
     
     return f'''
     <div class="stock-row {classes_str}" data-symbol="{symbol_attr}" data-sector="{sector_attr}" data-industry="{industry_attr}" data-strategies="{data_strategies}" data-setup="{data_setup}" data-squeeze="{data_squeeze}" data-rs="{rs_attr:.1f}" data-iv="{iv_attr}" data-gamma="{gamma_score_val}" data-wall="{gamma_wall_score_val}" data-gexnet="{net_gex_value:.2f}" data-short="{short_float if short_float is not None else 0}" data-callfloat="{call_float_pct if call_float_pct is not None else 0}" data-price="{close}" data-dist="{dist_52w:.1f}">
@@ -1276,16 +1251,8 @@ def make_row(row, price_data, anim_delay=0):
             <div class="mobile-primary-metrics">
                 <div class="stock-price">${close:.2f}</div>
                 <div class="metric iv-metric">IV<br><span class="iv-value iv-{iv_class}">{iv_display}</span></div>
-                <div class="metric gamma-metric" title="{gamma_title}">GS<br><span class="gamma-value gamma-{gamma_class}">{gamma_display}</span></div>
-                <div class="metric wall-metric" title="{gamma_wall_title}">GW<br><span class="gamma-wall-value gamma-wall-{gamma_wall_class}">{gamma_wall_display}</span></div>
-            </div>
-            <div class="secondary-metrics">
-                <div class="metric" title="{perf_title}">6M<br><span class="{perf_color}">{perf_6m:.1f}%</span></div>
                 <div class="metric" title="{rs_title}">RS<br><span class="{rs_color}">{rs_display}</span></div>
-                <div class="metric short-metric" title="{short_title}">Short<br><span class="short-value short-{short_class}">{short_display}</span></div>
-                <div class="metric callfloat-metric" title="{call_float_title}">Call/Float<br><span class="callfloat-value callfloat-{call_float_class}">{call_float_display}</span></div>
             </div>
-{optional_cards}
         </div>
     </div>'''
 
@@ -1294,14 +1261,19 @@ all_rows = ''.join([make_row(row, price_data, i*0.05) for i, (_, row) in enumera
 strength = sector_strength(all_stocks['sector'].tolist())
 pills = []
 for sector_label, count in strength:
-    pills.append(f'<span class="sector-pill">{html.escape(sector_label)} <b>{count}</b></span>')
+    sector_attr = html.escape(sector_label, quote=True)
+    pills.append(
+        f'<button type="button" class="sector-pill" data-sector="{sector_attr}" '
+        f'onclick="setSectorFilter(this.getAttribute(\'data-sector\'))">{html.escape(sector_label)} <b>{count}</b></button>'
+    )
 if not pills:
     pills.append('<span class="sector-pill">No sector data</span>')
 sector_summary_html = (
     '<div class="sector-summary">'
     '<div class="sector-summary-row"><span class="filter-label">Sector strength</span>'
+    '<button type="button" class="sector-clear" id="clearSector" hidden onclick="setSectorFilter(\'all\')">Clear</button>'
     f'<div class="sector-pills">{"".join(pills)}</div></div>'
-    '<p class="sector-note">Counts of names on this board (VCP, Qullamaggie, High Tight Flag, 52-week high). No pinned watchlist.</p>'
+    '<p class="sector-note">Counts of names in the current list. Click a sector to show only that sector.</p>'
     '</div>'
 )
 
@@ -1355,9 +1327,8 @@ body::before{{
 .header{{
     background:linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-primary) 100%);
     padding:12px 24px;
-    position:sticky;
-    top:0;
-    z-index:101;
+    position:relative;
+    z-index:1;
     display:flex;
     justify-content:space-between;
     align-items:center;
@@ -1423,9 +1394,8 @@ body::before{{
 .filter-section{{
     background:var(--bg-secondary);
     padding:16px 24px;
-    position:sticky;
-    top:0;
-    z-index:100;
+    position:relative;
+    z-index:1;
     border-bottom:1px solid var(--border);
     display:flex;
     gap:12px;
@@ -1580,8 +1550,10 @@ body::before{{
     min-width:0;
     display:flex;
     flex-direction:column;
-    justify-content:center;
-    gap:10px;
+    justify-content:flex-start;
+    align-items:stretch;
+    gap:8px;
+    cursor:pointer;
 }}
 
 .info-side .gamma-contract-card,
@@ -1636,8 +1608,9 @@ body::before{{
 }}
 
 .stock-header{{
-    flex:1 1 170px;
-    min-width:160px;
+    flex:0 1 auto;
+    min-width:0;
+    width:100%;
 }}
 
 .stock-info{{
@@ -1676,6 +1649,8 @@ body::before{{
     -webkit-line-clamp:2;
     -webkit-box-orient:vertical;
     overflow:hidden;
+    flex:none;
+    align-self:stretch;
 }}
 
 .ticker-link{{
@@ -1715,6 +1690,29 @@ body::before{{
     padding:3px 8px;
     font-size:11px;
     color:var(--text-secondary);
+    font-family:inherit;
+    cursor:pointer;
+}}
+
+.sector-pill.active{{
+    border-color:var(--accent);
+    color:var(--text-primary);
+    box-shadow:0 0 0 1px var(--accent);
+}}
+
+.sector-clear{{
+    background:transparent;
+    border:1px solid var(--border);
+    color:var(--text-secondary);
+    border-radius:999px;
+    padding:3px 8px;
+    font-size:11px;
+    font-family:inherit;
+    cursor:pointer;
+}}
+
+.sector-clear:hover,.sector-pill:hover{{
+    border-color:var(--accent);
 }}
 
 .sector-pill b{{
@@ -2179,9 +2177,9 @@ body::before{{
     }}
 
     .filter-section{{
-        position:sticky;
-        top:0;
-        z-index:100;
+        position:relative;
+        top:auto;
+        z-index:1;
         padding:10px 12px;
         gap:8px;
         display:grid;
@@ -2277,7 +2275,7 @@ body::before{{
     .mobile-primary-metrics{{
         width:100%;
         display:grid;
-        grid-template-columns:1fr 68px 68px 68px;
+        grid-template-columns:1fr 72px 72px;
         gap:8px;
         align-items:stretch;
         order:2;
@@ -2310,7 +2308,7 @@ body::before{{
         width:100%;
         order:3;
         display:grid;
-        grid-template-columns:repeat(4, 1fr);
+        grid-template-columns:repeat(3, 1fr);
         gap:7px;
     }}
     .metric{{
@@ -2411,9 +2409,6 @@ body::before{{
         <option value="HTF">High Tight Flag ({htf_count})</option>
         <option value="High52">52W High ({high52_count})</option>
     </select>
-    <select class="filter-select" id="industryFilter" onchange="filterChanged()">
-        {industry_filter_options}
-    </select>
     <select class="filter-select" id="sortFilter" onchange="sortChanged()">
         <option value="rs-desc" selected>RS ↓ (High to Low)</option>
         <option value="rs-asc">RS ↑ (Low to High)</option>
@@ -2436,7 +2431,6 @@ body::before{{
     <div style="flex:1;min-width:150px">Stock</div>
     <div style="width:80px">Price</div>
     <div style="width:60px">IV</div>
-    <div style="width:60px">6M</div>
     <div style="width:60px">RS</div>
     <div style="flex:1;min-width:150px">Chart</div>
 </div>
@@ -2573,8 +2567,36 @@ function exponentialMovingAverage(data, period) {{
     return out;
 }}
 
+function normalizeBars(data) {{
+    var rows = [];
+    for (var i = 0; i < (data || []).length; i++) {{
+        var bar = data[i];
+        var close = finiteClose(bar);
+        var open = Number(bar && bar.open);
+        var high = Number(bar && bar.high);
+        var low = Number(bar && bar.low);
+        var time = Number(bar && bar.time);
+        if (!isFinite(time) || close === null || !isFinite(open) || !isFinite(high) || !isFinite(low)) continue;
+        rows.push({{
+            time: time,
+            open: open,
+            high: Math.max(high, open, close),
+            low: Math.min(low, open, close),
+            close: close,
+            volume: Math.max(0, Number(bar.volume) || 0)
+        }});
+    }}
+    rows.sort(function(a, b) {{ return a.time - b.time; }});
+    var out = [];
+    for (var j = 0; j < rows.length; j++) {{
+        if (out.length && out[out.length - 1].time === rows[j].time) out[out.length - 1] = rows[j];
+        else out.push(rows[j]);
+    }}
+    return out;
+}}
+
 function addAverageLine(chart, points, color) {{
-    if (!points || !points.length) return;
+    if (!points || !points.length) return null;
     var series = chart.addLineSeries({{
         color: color,
         lineWidth: 2,
@@ -2584,17 +2606,19 @@ function addAverageLine(chart, points, color) {{
         crosshairMarkerVisible: false
     }});
     series.setData(points);
+    return series;
 }}
 
 function createChart(container, data) {{
-    if (!data || data.length === 0) return null;
+    var bars = normalizeBars(data);
+    if (!bars.length) return null;
     var chart = LightweightCharts.createChart(container, {{
         width: container.clientWidth || 420,
         height: container.clientHeight || 200,
         layout: {{ background: {{ type: 'solid', color: '#1e222d' }}, textColor: '#d1d4dc' }},
         grid: {{ vertLines: {{ color: '#2a2e39' }}, horzLines: {{ color: '#2a2e39' }} }},
         timeScale: {{ visible: false, fixLeftEdge: true, fixRightEdge: true, lockVisibleTimeRangeOnResize: true }},
-        rightPriceScale: {{ visible: false }},
+        rightPriceScale: {{ visible: false, scaleMargins: {{ top: 0.08, bottom: 0.24 }} }},
         handleScroll: false,
         handleScale: false,
         kineticScroll: {{ touch: false, mouse: false }},
@@ -2606,22 +2630,36 @@ function createChart(container, data) {{
         }}
     }});
     var candleSeries = chart.addCandlestickSeries({{
+        priceScaleId: 'right',
         upColor: '#26a69a', downColor: '#ef5350',
         borderUpColor: '#26a69a', borderDownColor: '#ef5350',
-        wickUpColor: '#26a69a', wickDownColor: '#ef5350'
+        wickUpColor: '#26a69a', wickDownColor: '#ef5350',
+        priceLineVisible: false,
+        lastValueVisible: false
     }});
-    candleSeries.setData(data);
+    candleSeries.setData(bars);
+    chart.priceScale('right').applyOptions({{
+        scaleMargins: {{ top: 0.08, bottom: 0.24 }},
+        borderVisible: false
+    }});
 
-    var volData = data.map(function(d) {{ return {{ time: d.time, value: d.volume || 0, color: d.close >= d.open ? '#26a69a80' : '#ef535080' }}; }});
+    // Volume has its own scale. Sharing the candle scale let those margins
+    // draw SMA/EMA on a different vertical range than the candles.
+    var volData = bars.map(function(d) {{ return {{ time: d.time, value: d.volume || 0, color: d.close >= d.open ? '#26a69a80' : '#ef535080' }}; }});
     var volSeries = chart.addHistogramSeries({{
         priceFormat: {{ type: 'volume' }},
-        priceScaleId: ''
+        priceScaleId: 'volume',
+        priceLineVisible: false,
+        lastValueVisible: false
     }});
     volSeries.setData(volData);
-    volSeries.priceScale().applyOptions({{ scaleMargins: {{ top: 0.82, bottom: 0 }} }});
+    chart.priceScale('volume').applyOptions({{
+        scaleMargins: {{ top: 0.78, bottom: 0 }},
+        borderVisible: false
+    }});
 
-    addAverageLine(chart, simpleMovingAverage(data, 8), '#ffd166');
-    addAverageLine(chart, exponentialMovingAverage(data, 20), '#80d8ff');
+    addAverageLine(chart, simpleMovingAverage(bars, 8), '#ffd166');
+    addAverageLine(chart, exponentialMovingAverage(bars, 20), '#80d8ff');
 
     chart.timeScale().fitContent();
     return chart;
@@ -2666,6 +2704,7 @@ function createChartForCell(cell) {{
 
 var currentSort = 'rs-desc';
 var currentMode = 'setups';
+var currentSector = 'all';
 var SETUP_OPTIONS = [
     ['VCP', 'VCP'],
     ['Qullamaggie', 'Qullamaggie'],
@@ -2755,18 +2794,29 @@ function getSymbolQuery() {{
     return input ? input.value.trim().toUpperCase() : '';
 }}
 
-function getIndustryFilter() {{
-    var select = document.getElementById('industryFilter');
-    return select ? select.value : 'all';
+function setSectorFilter(sector) {{
+    if (!sector || sector === 'all' || sector === currentSector) currentSector = 'all';
+    else currentSector = sector;
+    showAllRows();
 }}
 
-function getRowIndustry(row) {{
-    var sector = row.getAttribute('data-sector') || '-';
-    var industry = row.getAttribute('data-industry') || '-';
-    return {{
-        key: sector + '||' + industry,
-        label: sector + ' - ' + industry
-    }};
+function refreshSectorPills() {{
+    var counts = {{}};
+    document.querySelectorAll('.stock-row').forEach(function(row) {{
+        if (!rowInMode(row, currentMode)) return;
+        var sector = row.getAttribute('data-sector') || '';
+        if (!sector || sector === '-') return;
+        counts[sector] = (counts[sector] || 0) + 1;
+    }});
+    document.querySelectorAll('.sector-pill[data-sector]').forEach(function(btn) {{
+        var sector = btn.getAttribute('data-sector') || '';
+        var countEl = btn.querySelector('b');
+        if (countEl) countEl.textContent = String(counts[sector] || 0);
+        btn.classList.toggle('active', currentSector === sector);
+        btn.hidden = !counts[sector] && currentSector !== sector;
+    }});
+    var clearBtn = document.getElementById('clearSector');
+    if (clearBtn) clearBtn.hidden = currentSector === 'all';
 }}
 
 function rowMatchesBaseFilters(row, strategyFilter, symbolQuery) {{
@@ -2779,53 +2829,10 @@ function rowMatchesBaseFilters(row, strategyFilter, symbolQuery) {{
     return matchesStrategy && matchesSymbol;
 }}
 
-function refreshIndustryOptions(strategyFilter, symbolQuery) {{
-    var select = document.getElementById('industryFilter');
-    if (!select) return 'all';
-
-    var selected = select.value || 'all';
-    var counts = {{}};
-    var labels = {{}};
-    var allRows = document.querySelectorAll('.stock-row');
-
-    allRows.forEach(function(row) {{
-        if (!rowMatchesBaseFilters(row, strategyFilter, symbolQuery)) return;
-        var info = getRowIndustry(row);
-        if (info.key === '-||-') return;
-        counts[info.key] = (counts[info.key] || 0) + 1;
-        labels[info.key] = info.label;
-    }});
-
-    var keys = Object.keys(counts).sort(function(a, b) {{
-        return labels[a].localeCompare(labels[b]);
-    }});
-
-    select.innerHTML = '';
-    var allOption = document.createElement('option');
-    allOption.value = 'all';
-    allOption.textContent = 'All Industries';
-    select.appendChild(allOption);
-
-    keys.forEach(function(key) {{
-        var option = document.createElement('option');
-        option.value = key;
-        option.textContent = labels[key] + ' (' + counts[key] + ')';
-        select.appendChild(option);
-    }});
-
-    if (selected !== 'all' && counts[selected]) {{
-        select.value = selected;
-    }} else {{
-        select.value = 'all';
-    }}
-    return select.value;
-}}
-
-function rowMatchesFilters(row, strategyFilter, industryFilter, symbolQuery) {{
+function rowMatchesFilters(row, strategyFilter, symbolQuery) {{
     if (!rowMatchesBaseFilters(row, strategyFilter, symbolQuery)) return false;
-    var info = getRowIndustry(row);
-    var matchesIndustry = industryFilter === 'all' || industryFilter === info.key;
-    return matchesIndustry;
+    if (currentSector === 'all') return true;
+    return (row.getAttribute('data-sector') || '') === currentSector;
 }}
 
 function updateResultCount(count, total) {{
@@ -2839,13 +2846,13 @@ function updateResultCount(count, total) {{
 function showAllRows() {{
     updateModeCounts();
     refreshStrategyOptions();
+    refreshSectorPills();
     var filter = document.getElementById('strategyFilter').value;
     var symbolQuery = getSymbolQuery();
-    var industryFilter = refreshIndustryOptions(filter, symbolQuery);
     var rows = [];
     var allRows = document.querySelectorAll('.stock-row');
     allRows.forEach(function(row) {{
-        if (rowMatchesFilters(row, filter, industryFilter, symbolQuery)) {{
+        if (rowMatchesFilters(row, filter, symbolQuery)) {{
             rows.push(row);
             row.classList.add('visible');
             var chartCell = row.querySelector('.chart-cell');
@@ -2895,7 +2902,10 @@ function showAllRows() {{
         if (rowInMode(row, currentMode)) modeTotal += 1;
     }});
     var empty = document.getElementById('emptyMode');
-    if (empty) empty.hidden = rows.length !== 0;
+    if (empty) {{
+        empty.hidden = rows.length !== 0;
+        empty.textContent = 'No names match these filters.';
+    }}
     updateResultCount(rows.length, modeTotal);
 }}
 
@@ -2905,27 +2915,13 @@ function filterChanged() {{
 
 showAllRows();
 
-// Copy ticker on click
 document.querySelectorAll('.stock-row').forEach(function(row) {{
     row.addEventListener('click', function(e) {{
-        // Don't copy if clicking on chart
-        if (e.target.closest('.chart-cell') || e.target.closest('.gamma-contract-card') || e.target.closest('.modal') || e.target.closest('a')) return;
-        
-        var ticker = row.querySelector('.stock-ticker');
-        if (ticker) {{
-            var text = ticker.textContent.trim().split(' ')[0];  // Get first word (ticker)
-            navigator.clipboard.writeText(text).then(function() {{
-                // Brief visual feedback
-                var badge = row.querySelector('.strategy-badge');
-                if (badge) {{
-                    var original = badge.textContent;
-                    badge.textContent = 'Copied!';
-                    setTimeout(function() {{
-                        badge.textContent = original;
-                    }}, 1000);
-                }}
-            }});
-        }}
+        if (e.target.closest('.chart-cell') || e.target.closest('.modal') || e.target.closest('button')) return;
+        var link = row.querySelector('.ticker-link');
+        if (!link || !link.href) return;
+        if (e.target.closest('a')) return;
+        window.open(link.href, '_blank', 'noopener');
     }});
 }});
 
