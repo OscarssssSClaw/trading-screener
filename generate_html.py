@@ -1254,31 +1254,39 @@ def make_row(row, price_data, anim_delay=0):
     badges_str = ''.join(badges)
     classes_str = ' '.join(classes)
     data_strategies = ','.join(strat_list)
+    setup_keys = {'VCP', 'Qullamaggie', 'HTF', 'High52'}
+    squeeze_keys = {'Gamma', 'GammaWall', 'ShortFuel', 'CallFloat'}
+    data_setup = '1' if any(name in setup_keys for name in strat_list) else '0'
+    data_squeeze = '1' if any(name in squeeze_keys for name in strat_list) else '0'
     optional_cards = "\n".join(card for card in (gamma_card, gamma_wall_card) if card)
     
     return f'''
-    <div class="stock-row {classes_str}" data-symbol="{symbol_attr}" data-sector="{sector_attr}" data-industry="{industry_attr}" data-strategies="{data_strategies}" data-rs="{rs_attr:.1f}" data-iv="{iv_attr}" data-gamma="{gamma_score_val}" data-wall="{gamma_wall_score_val}" data-gexnet="{net_gex_value:.2f}" data-short="{short_float if short_float is not None else 0}" data-callfloat="{call_float_pct if call_float_pct is not None else 0}" data-price="{close}" data-dist="{dist_52w:.1f}">
-        <div class="stock-header">
-            <div class="stock-name">{name}</div>
-            <div class="stock-ticker">{ticker_link} {badges_str}</div>
-            <div class="stock-sector">{sector} - {industry}</div>
-            {summary_html}
+    <div class="stock-row {classes_str}" data-symbol="{symbol_attr}" data-sector="{sector_attr}" data-industry="{industry_attr}" data-strategies="{data_strategies}" data-setup="{data_setup}" data-squeeze="{data_squeeze}" data-rs="{rs_attr:.1f}" data-iv="{iv_attr}" data-gamma="{gamma_score_val}" data-wall="{gamma_wall_score_val}" data-gexnet="{net_gex_value:.2f}" data-short="{short_float if short_float is not None else 0}" data-callfloat="{call_float_pct if call_float_pct is not None else 0}" data-price="{close}" data-dist="{dist_52w:.1f}">
+        <div class="chart-side">
+            <div class="chart-cell" id="{chart_id}"><div class="chart-legend" aria-hidden="true"><span class="legend-sma">SMA 8</span><span class="legend-ema">EMA 20</span></div></div>
+            <script type="application/json" class="chart-data">{price_json}</script>
         </div>
-        <div class="mobile-primary-metrics">
-            <div class="stock-price">${close:.2f}</div>
-            <div class="metric iv-metric">IV<br><span class="iv-value iv-{iv_class}">{iv_display}</span></div>
-            <div class="metric gamma-metric" title="{gamma_title}">GS<br><span class="gamma-value gamma-{gamma_class}">{gamma_display}</span></div>
-            <div class="metric wall-metric" title="{gamma_wall_title}">GW<br><span class="gamma-wall-value gamma-wall-{gamma_wall_class}">{gamma_wall_display}</span></div>
-        </div>
+        <div class="info-side">
+            <div class="stock-header">
+                <div class="stock-name">{name}</div>
+                <div class="stock-ticker">{ticker_link} {badges_str}</div>
+                <div class="stock-sector">{sector} - {industry}</div>
+                {summary_html}
+            </div>
+            <div class="mobile-primary-metrics">
+                <div class="stock-price">${close:.2f}</div>
+                <div class="metric iv-metric">IV<br><span class="iv-value iv-{iv_class}">{iv_display}</span></div>
+                <div class="metric gamma-metric" title="{gamma_title}">GS<br><span class="gamma-value gamma-{gamma_class}">{gamma_display}</span></div>
+                <div class="metric wall-metric" title="{gamma_wall_title}">GW<br><span class="gamma-wall-value gamma-wall-{gamma_wall_class}">{gamma_wall_display}</span></div>
+            </div>
+            <div class="secondary-metrics">
+                <div class="metric" title="{perf_title}">6M<br><span class="{perf_color}">{perf_6m:.1f}%</span></div>
+                <div class="metric" title="{rs_title}">RS<br><span class="{rs_color}">{rs_display}</span></div>
+                <div class="metric short-metric" title="{short_title}">Short<br><span class="short-value short-{short_class}">{short_display}</span></div>
+                <div class="metric callfloat-metric" title="{call_float_title}">Call/Float<br><span class="callfloat-value callfloat-{call_float_class}">{call_float_display}</span></div>
+            </div>
 {optional_cards}
-        <div class="secondary-metrics">
-            <div class="metric" title="{perf_title}">6M<br><span class="{perf_color}">{perf_6m:.1f}%</span></div>
-            <div class="metric" title="{rs_title}">RS<br><span class="{rs_color}">{rs_display}</span></div>
-            <div class="metric short-metric" title="{short_title}">Short<br><span class="short-value short-{short_class}">{short_display}</span></div>
-            <div class="metric callfloat-metric" title="{call_float_title}">Call/Float<br><span class="callfloat-value callfloat-{call_float_class}">{call_float_display}</span></div>
         </div>
-        <div class="chart-cell" id="{chart_id}"><div class="chart-legend" aria-hidden="true"><span class="legend-sma">SMA 8</span><span class="legend-ema">EMA 20</span></div></div>
-        <script type="application/json" class="chart-data">{price_json}</script>
     </div>'''
 
 all_rows = ''.join([make_row(row, price_data, i*0.05) for i, (_, row) in enumerate(all_stocks.iterrows())])
@@ -1495,6 +1503,45 @@ body::before{{
     white-space:nowrap;
 }}
 
+.mode-toggle{{
+    display:inline-flex;
+    background:var(--bg-card);
+    border:1px solid var(--border);
+    border-radius:8px;
+    padding:3px;
+    gap:2px;
+}}
+
+.mode-btn{{
+    appearance:none;
+    border:0;
+    background:transparent;
+    color:var(--text-secondary);
+    font-family:inherit;
+    font-size:13px;
+    font-weight:700;
+    padding:8px 14px;
+    border-radius:6px;
+    cursor:pointer;
+    line-height:1;
+}}
+
+.mode-btn.active{{
+    background:var(--accent);
+    color:var(--bg-primary);
+}}
+
+.mode-count{{
+    margin-left:6px;
+    font-weight:700;
+}}
+
+.empty-mode{{
+    color:var(--text-muted);
+    text-align:center;
+    padding:28px 8px;
+}}
+
 .content{{padding:20px 24px}}
 
 .col-header{{
@@ -1517,8 +1564,31 @@ body::before{{
 }}
 
 .stock-row.visible{{
-    display:flex;
+    display:grid;
+    grid-template-columns:minmax(0, 1.45fr) minmax(280px, 0.85fr);
+    align-items:stretch;
     animation:slideIn 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}}
+
+.chart-side{{
+    min-width:0;
+    display:flex;
+    min-height:200px;
+}}
+
+.info-side{{
+    min-width:0;
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    gap:10px;
+}}
+
+.info-side .gamma-contract-card,
+.info-side .gamma-wall-card{{
+    width:100%;
+    min-width:0;
+    max-width:100%;
 }}
 
 .stock-row::before{{
@@ -1967,9 +2037,11 @@ body::before{{
 
 .chart-cell{{
     position:relative;
-    flex:1;
-    min-width:140px;
-    height:84px;
+    flex:1 1 auto;
+    width:100%;
+    min-width:0;
+    min-height:200px;
+    height:auto;
     border-radius:6px;
     overflow:hidden;
     border:1px solid var(--border);
@@ -2142,6 +2214,14 @@ body::before{{
         margin-left:0;
         font-size:11px;
     }}
+    .mode-toggle{{
+        grid-column:1 / -1;
+        display:flex;
+    }}
+    .mode-btn{{
+        flex:1;
+        padding:10px 8px;
+    }}
 
     .content{{padding:12px}}
     .sector-summary{{padding:8px 12px 10px}}
@@ -2160,6 +2240,12 @@ body::before{{
         display:grid;
         grid-template-columns:1fr;
         animation:none;
+    }}
+    .chart-side{{
+        min-height:0;
+    }}
+    .info-side{{
+        justify-content:flex-start;
     }}
     .stock-row:hover{{
         transform:none;
@@ -2277,11 +2363,11 @@ body::before{{
     .gamma-wall-row strong{{font-size:15px}}
 
     .chart-cell{{
-        order:6;
-        flex:1 1 100%;
+        flex:none;
         width:100%;
         min-width:0;
-        height:100px;
+        height:188px;
+        min-height:188px;
         margin-top:0;
         border-radius:12px;
     }}
@@ -2313,6 +2399,10 @@ body::before{{
     <button class="info-btn" onclick="showInfo()">ℹ️ Info</button>
 </div>
 <div class="filter-section">
+    <div class="mode-toggle" role="tablist" aria-label="Board mode">
+        <button type="button" class="mode-btn active" role="tab" id="modeSetups" aria-selected="true" data-mode="setups" onclick="setMode('setups')">Setups <span class="mode-count" id="setupCount"></span></button>
+        <button type="button" class="mode-btn" role="tab" id="modeSqueeze" aria-selected="false" data-mode="squeeze" onclick="setMode('squeeze')">Squeeze <span class="mode-count" id="squeezeCount"></span></button>
+    </div>
     <span class="filter-label">Filters:</span>
     <select class="filter-select" id="strategyFilter" onchange="filterChanged()">
         <option value="all">All ({len(all_stocks)})</option>
@@ -2320,10 +2410,6 @@ body::before{{
         <option value="Qullamaggie">Qullamaggie ({ql_count})</option>
         <option value="HTF">High Tight Flag ({htf_count})</option>
         <option value="High52">52W High ({high52_count})</option>
-        <option value="Gamma">Gamma Squeeze ({gamma_count})</option>
-        <option value="GammaWall">Gamma Wall ({gamma_wall_count})</option>
-        <option value="ShortFuel">Short Fuel ({short_fuel_count})</option>
-        <option value="CallFloat">Call/Float</option>
     </select>
     <select class="filter-select" id="industryFilter" onchange="filterChanged()">
         {industry_filter_options}
@@ -2403,7 +2489,8 @@ body::before{{
         </div>
         <div class="modal-section">
             <h3>Chart</h3>
-            <p>Each row keeps candlesticks and volume. Gold is the 8-day simple moving average of the close. Blue is the 20-day exponential moving average. A line is drawn only after that many daily bars exist. Distance to the 52-week high and ADR stay in the screen rules and in the row data used for sorting; they are not shown as metric cells.</p>
+            <p>Each row keeps candlesticks and volume, with the chart beside the name and metrics. Gold is the 8-day simple moving average of the close. Blue is the 20-day exponential moving average. A line is drawn only after that many daily bars exist. Distance to the 52-week high and ADR stay in the screen rules and in the row data used for sorting; they are not shown as metric cells.</p>
+            <p>Setups is the default list: VCP, Qullamaggie, High Tight Flag, and 52-week high. Squeeze is the other list: gamma squeeze, gamma wall, short fuel, and call/float. A name with both kinds of badges is in both lists. Filters and sort apply inside the active list.</p>
         </div>
         <div class="modal-section">
             <h3>Field limits</h3>
@@ -2440,6 +2527,7 @@ body::before{{
     </div>
 </div>
 <div class="content">
+<p class="empty-mode" id="emptyMode" hidden>No names in this mode.</p>
 {all_rows}
 </div>
 <script>
@@ -2501,8 +2589,8 @@ function addAverageLine(chart, points, color) {{
 function createChart(container, data) {{
     if (!data || data.length === 0) return null;
     var chart = LightweightCharts.createChart(container, {{
-        width: container.clientWidth || 180,
-        height: container.clientHeight || 84,
+        width: container.clientWidth || 420,
+        height: container.clientHeight || 200,
         layout: {{ background: {{ type: 'solid', color: '#1e222d' }}, textColor: '#d1d4dc' }},
         grid: {{ vertLines: {{ color: '#2a2e39' }}, horzLines: {{ color: '#2a2e39' }} }},
         timeScale: {{ visible: false, fixLeftEdge: true, fixRightEdge: true, lockVisibleTimeRangeOnResize: true }},
@@ -2539,9 +2627,21 @@ function createChart(container, data) {{
     return chart;
 }}
 
+function resizeChart(chart, container) {{
+    if (!chart || !container) return;
+    var width = container.clientWidth;
+    var height = container.clientHeight;
+    if (width < 40 || height < 40) return;
+    chart.applyOptions({{ width: width, height: height }});
+    chart.timeScale().fitContent();
+}}
+
 function createChartForCell(cell) {{
     var chartId = cell.id;
-    if (chartInstances[chartId]) return;
+    if (chartInstances[chartId]) {{
+        resizeChart(chartInstances[chartId], cell);
+        return;
+    }}
     
     var dataEl = cell.nextElementSibling;
     if (!dataEl || !dataEl.classList.contains('chart-data')) return;
@@ -2553,12 +2653,97 @@ function createChartForCell(cell) {{
         var chart = createChart(cell, data);
         if (chart) {{
             chartInstances[chartId] = chart;
+            if (window.ResizeObserver) {{
+                var observer = new ResizeObserver(function() {{
+                    resizeChart(chart, cell);
+                }});
+                observer.observe(cell);
+            }}
         }}
     }} catch(e) {{}}
 }}
 
 
 var currentSort = 'rs-desc';
+var currentMode = 'setups';
+var SETUP_OPTIONS = [
+    ['VCP', 'VCP'],
+    ['Qullamaggie', 'Qullamaggie'],
+    ['HTF', 'High Tight Flag'],
+    ['High52', '52W High']
+];
+var SQUEEZE_OPTIONS = [
+    ['Gamma', 'Gamma Squeeze'],
+    ['GammaWall', 'Gamma Wall'],
+    ['ShortFuel', 'Short Fuel'],
+    ['CallFloat', 'Call/Float']
+];
+
+function modeOptions(mode) {{
+    return mode === 'squeeze' ? SQUEEZE_OPTIONS : SETUP_OPTIONS;
+}}
+
+function rowInMode(row, mode) {{
+    if (!row) return false;
+    return row.getAttribute(mode === 'squeeze' ? 'data-squeeze' : 'data-setup') === '1';
+}}
+
+function setMode(mode) {{
+    currentMode = mode === 'squeeze' ? 'squeeze' : 'setups';
+    document.querySelectorAll('.mode-btn').forEach(function(btn) {{
+        var on = btn.getAttribute('data-mode') === currentMode;
+        btn.classList.toggle('active', on);
+        btn.setAttribute('aria-selected', on ? 'true' : 'false');
+    }});
+    var select = document.getElementById('strategyFilter');
+    var allowed = modeOptions(currentMode).some(function(opt) {{ return opt[0] === select.value; }});
+    if (select.value !== 'all' && !allowed) select.value = 'all';
+    showAllRows();
+}}
+
+function updateModeCounts() {{
+    var setups = 0;
+    var squeeze = 0;
+    document.querySelectorAll('.stock-row').forEach(function(row) {{
+        if (row.getAttribute('data-setup') === '1') setups += 1;
+        if (row.getAttribute('data-squeeze') === '1') squeeze += 1;
+    }});
+    var setupEl = document.getElementById('setupCount');
+    var squeezeEl = document.getElementById('squeezeCount');
+    if (setupEl) setupEl.textContent = String(setups);
+    if (squeezeEl) squeezeEl.textContent = String(squeeze);
+}}
+
+function refreshStrategyOptions() {{
+    var select = document.getElementById('strategyFilter');
+    if (!select) return 'all';
+    var selected = select.value || 'all';
+    var options = modeOptions(currentMode);
+    var counts = {{}};
+    var modeCount = 0;
+    document.querySelectorAll('.stock-row').forEach(function(row) {{
+        if (!rowInMode(row, currentMode)) return;
+        modeCount += 1;
+        var list = (row.getAttribute('data-strategies') || '').split(',');
+        options.forEach(function(opt) {{
+            if (list.indexOf(opt[0]) !== -1) counts[opt[0]] = (counts[opt[0]] || 0) + 1;
+        }});
+    }});
+    select.innerHTML = '';
+    var allOption = document.createElement('option');
+    allOption.value = 'all';
+    allOption.textContent = 'All (' + modeCount + ')';
+    select.appendChild(allOption);
+    options.forEach(function(opt) {{
+        var option = document.createElement('option');
+        option.value = opt[0];
+        option.textContent = opt[1] + ' (' + (counts[opt[0]] || 0) + ')';
+        select.appendChild(option);
+    }});
+    var stillThere = selected === 'all' || options.some(function(opt) {{ return opt[0] === selected; }});
+    select.value = stillThere ? selected : 'all';
+    return select.value;
+}}
 
 function sortChanged() {{
     currentSort = document.getElementById('sortFilter').value;
@@ -2585,6 +2770,7 @@ function getRowIndustry(row) {{
 }}
 
 function rowMatchesBaseFilters(row, strategyFilter, symbolQuery) {{
+    if (!rowInMode(row, currentMode)) return false;
     var strategies = row.getAttribute('data-strategies') || '';
     var stratList = strategies.split(',').map(function(s) {{ return s.trim(); }});
     var matchesStrategy = strategyFilter === 'all' || stratList.indexOf(strategyFilter) !== -1;
@@ -2645,11 +2831,14 @@ function rowMatchesFilters(row, strategyFilter, industryFilter, symbolQuery) {{
 function updateResultCount(count, total) {{
     var counter = document.getElementById('resultCount');
     if (counter) {{
-        counter.textContent = 'Showing ' + count + ' / ' + total;
+        var label = currentMode === 'squeeze' ? 'squeeze' : 'setups';
+        counter.textContent = 'Showing ' + count + ' / ' + total + ' ' + label;
     }}
 }}
 
 function showAllRows() {{
+    updateModeCounts();
+    refreshStrategyOptions();
     var filter = document.getElementById('strategyFilter').value;
     var symbolQuery = getSymbolQuery();
     var industryFilter = refreshIndustryOptions(filter, symbolQuery);
@@ -2697,11 +2886,17 @@ function showAllRows() {{
         return 0;
     }});
     
-    var parent = rows[0] ? rows[0].parentNode : null;
+    var parent = document.querySelector('.content');
     if (parent) {{
         rows.forEach(function(row) {{ parent.appendChild(row); }});
     }}
-    updateResultCount(rows.length, allRows.length);
+    var modeTotal = 0;
+    allRows.forEach(function(row) {{
+        if (rowInMode(row, currentMode)) modeTotal += 1;
+    }});
+    var empty = document.getElementById('emptyMode');
+    if (empty) empty.hidden = rows.length !== 0;
+    updateResultCount(rows.length, modeTotal);
 }}
 
 function filterChanged() {{
