@@ -1,32 +1,32 @@
 {
   "contracts": {
-    "GILD|2026-10-30 $162.5C": {
-      "ask": 5.5,
-      "bid": 4.65,
-      "call_share_equiv": 160000,
-      "contract": "2026-10-30 $162.5C",
-      "contract_call_volume": 1600,
-      "expiry": "2026-10-30",
-      "first_seen_at": "2026-10-30 07:03 HK",
-      "first_seen_date": "2026-10-30",
-      "iv": 67.9,
-      "last": 5.04,
-      "last_trade_time": "2026-10-30 03:59 HK",
-      "mid": 5.08,
-      "openInterest": 174,
-      "pct_otm": -1.9,
-      "premium": 812000.0,
-      "score": 100,
-      "seen_date": "2026-10-30",
-      "strike": 162.5,
-      "symbol": "GILD",
-      "tags": "CALL, 0-7DTE, near/OTM, Vol/OI>=5, Prem>$500K, Near high, Above MA",
-      "ticker": "NASDAQ:GILD",
+    "VRSN|2026-12-18 $330C": {
+      "ask": 4.5,
+      "bid": 3.1,
+      "call_share_equiv": 174400,
+      "contract": "2026-12-18 $330C",
+      "contract_call_volume": 1744,
+      "expiry": "2026-12-18",
+      "first_seen_at": "2026-11-21 08:31 HK",
+      "first_seen_date": "2026-11-21",
+      "iv": 36.7,
+      "last": 4.47,
+      "last_trade_time": "2026-11-21 04:40 HK",
+      "mid": 3.8,
+      "openInterest": 138,
+      "pct_otm": 7.5,
+      "premium": 662720.0,
+      "score": 75,
+      "seen_date": "2026-11-21",
+      "strike": 330.0,
+      "symbol": "VRSN",
+      "tags": "CALL, 15-30DTE, near/OTM, Vol/OI>=10, Prem>$500K",
+      "ticker": "NASDAQ:VRSN",
       "type": "CALL",
-      "updated_at": "2026-10-30 07:03 HK",
-      "vol_oi": 9.2,
-      "volume": 1600
+      "updated_at": "2026-11-21 08:31 HK",
+      "vol_oi": 12.64,
+      "volume": 1744
     }
   },
-  "updated_at": "2026-10-30 07:03 HK"
+  "updated_at": "2026-11-21 08:31 HK"
 }
